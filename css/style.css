@@ -353,6 +353,46 @@ select {
 .near-item.near-closed { border-left: 4px dashed var(--muted); }
 .near-closed .near-name { color: var(--muted); }
 
+/* ---------- 巡回ルート ---------- */
+.route-pref-box summary { cursor: pointer; color: var(--accent); font-weight: bold; }
+.route-region { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
+.route-region-name { font-weight: bold; min-width: 5.5em; }
+.route-pref { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+.route-map { height: 50vh; min-height: 300px; border-radius: var(--radius); overflow: hidden; background: var(--code-bg); }
+.route-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.route-stop { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+.route-stop-head { display: flex; align-items: baseline; gap: 8px; }
+.route-num {
+  flex: none;
+  min-width: 2.2em;
+  text-align: center;
+  font-weight: bold;
+  font-size: 13px;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.route-name { font-weight: bold; font-size: 16px; overflow-wrap: anywhere; }
+.route-rides { margin: 4px 0 0 calc(2.2em + 20px); font-size: 13px; color: var(--muted); }
+.route-km { font-weight: bold; color: var(--text); }
+.route-ride { overflow-wrap: anywhere; }
+.route-ride.guess { color: var(--warn); }
+.route-pin span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  border: 2px solid #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, .5);
+}
+
 /* ---------- デバイス間の共有 ---------- */
 .sync-form { display: flex; flex-direction: column; gap: 8px; }
 .sync-form .select-label { flex: none; }   /* 縦に並べるので、地図用の「幅を広げる」指定を外す */

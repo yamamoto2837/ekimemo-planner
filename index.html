@@ -20,6 +20,7 @@
     <a href="#near" data-screen="near">近くの駅</a>
     <a href="#collect" data-screen="collect">取りこぼし回収</a>
     <a href="#line" data-screen="line">路線詳細</a>
+    <a href="#route" data-screen="route">巡回ルート</a>
     <a href="#import" data-screen="import">データ取り込み</a>
   </nav>
 </header>
@@ -142,6 +143,35 @@
     </div>
   </section>
 
+  <!-- ===== 巡回ルート（F7） ===== -->
+  <section id="route" class="screen" hidden>
+    <h2>巡回ルート</h2>
+    <p class="help">選んだ都道府県の未アクセス駅（行ける駅）を、線路に沿って回る順番を考えます。乗り換え時間や運行本数は考えません。</p>
+
+    <div id="routeEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="routeBody" hidden>
+      <div class="panel filters">
+        <details open class="route-pref-box">
+          <summary id="routePrefSummary">都道府県を選ぶ</summary>
+          <div id="routePrefList"></div>
+          <button type="button" id="routeClearPrefs" class="memo-button">選んだ都道府県をすべて外す</button>
+        </details>
+        <form id="routeStartForm" class="filter-row">
+          <input type="search" id="routeStart" placeholder="出発する駅（空なら自動で決めます）" aria-label="出発する駅">
+        </form>
+        <label class="check"><input type="checkbox" id="routeRound"> 出発駅に戻ってくる</label>
+        <div class="buttons">
+          <button type="button" id="routeRun" class="primary">順番を考える</button>
+        </div>
+        <p id="routeMessage" class="message" role="status"></p>
+      </div>
+      <div id="routeResult"></div>
+    </div>
+  </section>
+
   <!-- ===== データ取り込み画面（F1） ===== -->
   <section id="import" class="screen" hidden>
     <h2>データ取り込み</h2>
@@ -248,5 +278,7 @@
 <script src="js/map.js"></script>
 <script src="js/near.js"></script>
 <script src="js/sync.js"></script>
+<script src="js/routeplan.js"></script>
+<script src="js/route.js"></script>
 </body>
 </html>
