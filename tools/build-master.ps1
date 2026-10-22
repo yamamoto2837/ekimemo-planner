@@ -134,6 +134,23 @@ foreach ($x in $extraRows) {
 }
 
 # ------------------------------------------------------------
+# 4b2. 駅名・廃駅の修正（data/station_fix.csv）
+#     駅データ.jp と駅メモで、駅名や廃駅かどうかが違う駅を直す。
+#       name   : 空でなければ、その駅名に変える
+#       closed : 1 なら廃駅にする、0 なら現役にする、空なら変えない
+#     「駅メモの駅」をまとめる前に直すので、まとめた結果にも反映される。
+# ------------------------------------------------------------
+$fixFile = Join-Path $dataDir 'station_fix.csv'
+$fixRows = @()
+if (Test-Path $fixFile) { $fixRows = @(Import-Csv $fixFile -Encoding UTF8) }   # 1行だけでも一覧として扱う
+foreach ($f in $fixRows) {
+  if (-not $stations.ContainsKey($f.station_cd)) { Write-Warning "station_fix.csv の駅コード $($f.station_cd) がマスタにありません"; continue }
+  if ($f.name) { $stations[$f.station_cd]['name'] = $f.name }
+  if ($f.closed -eq '1') { $stations[$f.station_cd]['closed'] = $true }
+  if ($f.closed -eq '0') { $stations[$f.station_cd]['closed'] = $false }
+}
+
+# ------------------------------------------------------------
 # 4c. 駅メモの駅（数える単位 = units）
 #     駅メモは駅名が違えば別の駅として数える（名古屋と名鉄名古屋は別）。
 #     そこで「駅データ.jp の駅グループ ＋ 駅名」を1駅とする。
@@ -385,6 +402,7 @@ Write-Host "駅メモに無いため外した駅コード: $excludedHit（つな
 Write-Host "駅コード数                   : $($stations.Count)"
 Write-Host "駅メモの駅数（数える単位）   : $($units.Count)（うち廃駅 $closedUnits）"
 Write-Host "例外の表（unit_override）    : $($overrideRows.Count) 行"
+Write-Host "駅名・廃駅の修正（station_fix）: $($fixRows.Count) 行"
 Write-Host "路線数                       : $($lines.Count)"
 Write-Host "  一本道 $($shapeCount.path) / 分岐 $($shapeCount.branch) / 環状 $($shapeCount.loop) / 接続データなし $($shapeCount.nojoin)"
 Write-Host "読み飛ばした接続駅データ     : $skippedJoin 行（マスタに無い駅を含む）"

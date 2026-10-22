@@ -7,9 +7,10 @@
 data/progress.json
 
 # 駅データ.jp の元のCSV（アプリを動かすのには使わない。変換は手元で行う）
-data/station*.csv
-data/line*.csv
-data/join*.csv
+# （名前の後ろに日付の数字が続くもの。station_fix.csv など手で直す表は送る）
+data/station[0-9]*.csv
+data/line[0-9]*.csv
+data/join[0-9]*.csv
 
 # 検証結果（アクセス済みの駅の一覧などを含む）
 docs/step2_検証結果/
