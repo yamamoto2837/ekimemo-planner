@@ -314,22 +314,34 @@ foreach ($l in $lineRows) {
 
 # ------------------------------------------------------------
 # 6b. 追加駅を路線の駅順に入れる
-#     既にある路線：いちばん近い駅のすぐ後ろに差し込む。
+#     既にある路線：差し込んでも遠回りがいちばん少ない場所に入れる。
 #     新しい路線　：端の駅から「まだ並べていない中で一番近い駅」を順につなぐ。
 #     どちらも推定なので、路線に estimated（並び順は推定）の印を付ける。
 # ------------------------------------------------------------
 function DistKm($a, $b) { $dx = ($a.lon - $b.lon) * 91; $dy = ($a.lat - $b.lat) * 111; [math]::Sqrt($dx * $dx + $dy * $dy) }
+
+# 並び（$list）の中で、駅 $c を入れたときに道のりの増え方が一番少ない場所に差し込む。
+# 両端の外側（先頭の前・最後の後ろ）も候補にする。
+function InsertCheapest($list, $c) {
+  if ($list.Count -eq 0) { [void]$list.Add($c); return }
+  $p = $stations[$c]
+  $bestAt = 0; $bestCost = DistKm $p $stations[$list[0]]                     # 先頭の前
+  $endCost = DistKm $p $stations[$list[$list.Count - 1]]                     # 最後の後ろ
+  if ($endCost -lt $bestCost) { $bestAt = $list.Count; $bestCost = $endCost }
+  for ($i = 0; $i -lt $list.Count - 1; $i++) {                               # 駅と駅のあいだ
+    $a = $stations[$list[$i]]; $b = $stations[$list[$i + 1]]
+    $cost = (DistKm $a $p) + (DistKm $p $b) - (DistKm $a $b)
+    if ($cost -lt $bestCost) { $bestAt = $i + 1; $bestCost = $cost }
+  }
+  $list.Insert($bestAt, $c)
+}
 
 foreach ($lcd in $extraByLine.Keys) {
   $codes = @($extraByLine[$lcd])
   if ($lines.ContainsKey($lcd)) {
     $list = New-Object System.Collections.ArrayList
     foreach ($s in $lines[$lcd].stations) { [void]$list.Add($s) }
-    foreach ($c in $codes) {
-      $best = $null; $bestD = [double]::MaxValue
-      foreach ($s in $list) { $d = DistKm $stations[$c] $stations[$s]; if ($d -lt $bestD) { $bestD = $d; $best = $s } }
-      $list.Insert($list.IndexOf($best) + 1, $c)
-    }
+    foreach ($c in $codes) { InsertCheapest $list $c }
     $lines[$lcd].stations = @($list)
     $lines[$lcd].estimated = $true
   } else {
@@ -356,6 +368,44 @@ foreach ($lcd in $extraByLine.Keys) {
     }
     $shapeCount['nojoin']++
   }
+}
+
+# ------------------------------------------------------------
+# 6c. 路線名を駅メモの表記に直す（data/line_names.csv）
+#     name       : 空でなければ、その路線名に変える
+#     merge_into : 路線コードがあれば、その路線にまとめる（駅を移して、元の路線は無くす）
+#                  駅メモには無く、駅がほかの路線と重なる路線（京王新線など）に使う
+# ------------------------------------------------------------
+$lineNameFile = Join-Path $dataDir 'line_names.csv'
+$lineNameRows = @()
+if (Test-Path $lineNameFile) { $lineNameRows = @(Import-Csv $lineNameFile -Encoding UTF8) }
+$mergedLines = 0; $renamedLines = 0
+
+foreach ($r in ($lineNameRows | Where-Object { $_.merge_into })) {
+  $src = $r.line_cd; $dst = $r.merge_into
+  if (-not $lines.ContainsKey($src) -or -not $lines.ContainsKey($dst)) { Write-Warning "line_names.csv: $src → $dst の路線がありません"; continue }
+  $list = New-Object System.Collections.ArrayList
+  foreach ($s in $lines[$dst].stations) { [void]$list.Add($s) }
+  $have = @{}; foreach ($s in $list) { $have[$stations[$s]['u']] = $true }
+  foreach ($c in $lines[$src].stations) {
+    if (-not $have.ContainsKey($stations[$c]['u'])) { InsertCheapest $list $c; $have[$stations[$c]['u']] = $true }
+    $stations[$c]['line'] = $dst    # 駅の路線も付け替える
+  }
+  $lines[$dst].stations = @($list)
+  $lines[$dst].estimated = $true
+  # 接続駅データも移す（あとで経路を計算するときに使う）
+  if ($joins.ContainsKey($src)) {
+    if (-not $joins.ContainsKey($dst)) { $joins[$dst] = New-Object System.Collections.ArrayList }
+    foreach ($pair in $joins[$src]) { [void]$joins[$dst].Add($pair) }
+    $joins.Remove($src)
+  }
+  $lines.Remove($src)
+  $mergedLines++
+}
+foreach ($r in ($lineNameRows | Where-Object { $_.name })) {
+  if (-not $lines.ContainsKey($r.line_cd)) { Write-Warning "line_names.csv: 路線コード $($r.line_cd) がありません"; continue }
+  $lines[$r.line_cd]['name'] = $r.name
+  $renamedLines++
 }
 
 # ------------------------------------------------------------
@@ -407,6 +457,7 @@ Write-Host "路線数                       : $($lines.Count)"
 Write-Host "  一本道 $($shapeCount.path) / 分岐 $($shapeCount.branch) / 環状 $($shapeCount.loop) / 接続データなし $($shapeCount.nojoin)"
 Write-Host "読み飛ばした接続駅データ     : $skippedJoin 行（マスタに無い駅を含む）"
 Write-Host "追加駅                       : $($extraRows.Count) 駅（$($extraByLine.Count) 路線に配置）"
+Write-Host "路線名の修正（line_names）   : 名前を変えた $renamedLines 路線 / まとめた $mergedLines 路線"
 Write-Host "旧コード対応表               : $($aliases.Count) 件"
 Write-Host "e_sort と接続順が違った路線  : $($reordered.Count) 本（接続順を採用）"
 $reordered | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" }
