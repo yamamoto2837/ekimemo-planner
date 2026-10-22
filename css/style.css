@@ -423,6 +423,22 @@ select {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
 }
 .plan-section { margin: 16px 0 8px; }
+.plan-via { margin-top: 2px; overflow-wrap: anywhere; }
+.plan-via-done { color: var(--good); }
+
+/* 自分でルートを作る */
+.myroute > summary { cursor: pointer; color: var(--accent); font-weight: bold; font-size: 16px; }
+.myroute[open] > summary { margin-bottom: 8px; }
+.myroute-form { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.myroute-form .select-label:last-child { flex-basis: 100%; }
+.myroute-form input[type="text"], .myroute-form input[type="date"] {
+  font: inherit; font-size: 15px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+}
+.myroute-form textarea { font-family: inherit; font-size: 15px; }
+.myroute .route-list { margin-top: 8px; }
+.myroute .memo-label { margin-top: 12px; }
+.myroute-choice { flex: 1 1 auto; min-width: 0; font-weight: bold; }
 .plan-card { padding: 0; }
 .plan-card > *:not(summary) { margin-left: 16px; margin-right: 16px; }
 .plan-card > :last-child { margin-bottom: 16px; }

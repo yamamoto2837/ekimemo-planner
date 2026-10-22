@@ -147,6 +147,7 @@ async function startApp() {
   initSyncScreen();      // sync.js（共有の設定を読む）
   initRouteScreen();     // route.js
   initPlansScreen();     // plans.js
+  initMyRoute();         // myroute.js（自分でルートを作る欄）
   initRadarScreen();     // radar.js
 
   // メモは進捗が無くても使えるので、先に読み込む（memo.js）

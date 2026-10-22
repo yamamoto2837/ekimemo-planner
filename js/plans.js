@@ -104,6 +104,38 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets) {
   return plan.id;
 }
 
+// 自分で決めた順番のルート（routeplan.js の planFixedRoute の戻り値）から、プランを作って保存する
+// 回る対象は、通る駅のうち、いま未アクセスの駅（途中の駅も含む）
+async function addPlanFromMyRoute(name, date, route, note) {
+  const accessed = appState.resolved ? appState.resolved.accessed : new Set();
+  const plan = {
+    id: newPlanId(),
+    kind: 'manual',   // 自分で作ったルート
+    name,
+    date,
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+    round: false,
+    start: route.order[0],
+    stops: route.order.map(u => ({ u, name: MASTER.units[u].name, pref: MASTER.units[u].pref })),
+    targets: route.passed.filter(u => !accessed.has(u)),
+    legs: route.legs.map(l => ({
+      km: Math.round(l.km * 10) / 10,
+      rides: l.rides.map(r => ({ line: lineName(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
+      // 途中で通る駅（区間の両はしの駅は除く）
+      via: [...new Set(l.rides.flatMap(r => r.path))].filter(u => u !== l.from && u !== l.to),
+    })),
+    totalKm: Math.round(route.totalKm),
+    note: note || '',
+    result: null,
+  };
+  touchPlan(plan);
+  planData.plans[plan.id] = plan;
+  await storePlans();
+  renderPlans();
+  return plan.id;
+}
+
 // 消す（ほかのデバイスにも伝わるよう、「消した」という印だけ残す）
 async function deletePlan(id) {
   const old = planData.plans[id];
@@ -202,8 +234,11 @@ function planCard(plan) {
   summary.append(
     el('span', 'plan-date', formatPlanDate(plan.date)),
     el('span', 'plan-name', plan.name),
-    el('span', 'plan-nums', `${units.length} 駅・約 ${plan.totalKm} km・アクセス済み ${done}/${units.length}`),
   );
+  if (plan.kind === 'manual') summary.append(el('span', 'tag', '自分で作ったルート'));
+  summary.append(el('span', 'plan-nums', plan.kind === 'manual'
+    ? `立ち寄り ${plan.stops.length} 駅・約 ${plan.totalKm} km・通る未アクセス駅 ${units.length} のうち ${done} 駅アクセス済み`
+    : `${units.length} 駅・約 ${plan.totalKm} km・アクセス済み ${done}/${units.length}`));
   card.append(summary);
 
   // 結果
@@ -252,7 +287,7 @@ function planCard(plan) {
     const li = el('li', 'route-stop' + (accessed.has(s.u) ? ' plan-done' : ''));
     const head = el('div', 'route-stop-head');
     const isStart = i === 0 && plan.start === s.u;
-    const isReturn = plan.round && i === plan.stops.length - 1 && i > 0;
+    const isReturn = (plan.round || plan.kind === 'manual') && i === plan.stops.length - 1 && i > 0;
     head.append(
       el('span', 'route-num', isStart ? '出発' : isReturn ? '到着' : String(plan.start ? i : i + 1)),
       el('span', 'route-name', s.name),
@@ -265,6 +300,17 @@ function planCard(plan) {
       const rides = el('div', 'route-rides');
       rides.append(el('span', 'route-km', `約 ${leg.km} km`));
       leg.rides.forEach(r => rides.append(el('div', 'route-ride', r.line === '乗り換え' ? `乗り換え（${r.from}→${r.to}）` : `${r.line}：${r.from}→${r.to}`)));
+      // 途中で通る、回る対象の駅（自分で作ったルート）
+      const viaTargets = (leg.via || []).filter(u => units.includes(u) && MASTER.units[u]);
+      if (viaTargets.length) {
+        const via = el('div', 'plan-via');
+        via.append(el('span', '', `途中の未アクセスだった駅 ${viaTargets.length}：`));
+        viaTargets.forEach((u, k) => {
+          if (k > 0) via.append('、');
+          via.append(el('span', accessed.has(u) ? 'plan-via-done' : '', MASTER.units[u].name + (accessed.has(u) ? '✓' : '')));
+        });
+        rides.append(via);
+      }
       li.append(rides);
     }
     list.append(li);

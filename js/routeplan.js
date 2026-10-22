@@ -244,11 +244,28 @@ function planRoute(targets, startUnit, round) {
 
   // 区間ごとに、通る駅と乗る路線を求める
   const orderUnits = best.map(i => P[i]);
+  const { legs, guessed } = routeLegs(g, orderUnits);
+  return {
+    order: orderUnits,
+    legs,
+    totalKm: legs.reduce((s, l) => s + l.km, 0),
+    unreachable: unreachable.map(i => typeof i === 'number' ? points[i] : i),
+    guessed: [...guessed],
+  };
+}
+
+// 並び orderUnits の、となりどうしの区間ごとに、線路に沿っていちばん短い道を求める。
+// 戻り値: { legs: [{ from, to, km, rides: [{ line, from, to, km, path }] }], guessed: Set, broken: [区間の番号] }
+//   broken … 線路がつながっていない区間（km が Infinity になる）
+function routeLegs(g, orderUnits) {
   const legs = [];
   const guessed = new Set();
+  const broken = [];
   for (let i = 0; i + 1 < orderUnits.length; i++) {
     const from = g.index.get(orderUnits[i]), toIdx = g.index.get(orderUnits[i + 1]);
+    if (from === undefined || toIdx === undefined) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
     const r = routeDijkstra(g, from);
+    if (!isFinite(r.dist[toIdx])) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
     const edges = [];
     for (let v = toIdx; v !== from; v = r.prevNode[v]) edges.push({ node: v, prev: r.prevNode[v], line: g.line[r.prevEdge[v]], w: g.weight[r.prevEdge[v]] });
     edges.reverse();
@@ -262,11 +279,28 @@ function planRoute(targets, startUnit, round) {
     }
     legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: r.dist[toIdx], rides });
   }
+  return { legs, guessed, broken };
+}
+
+// 自分で決めた順番（駅の並び）のまま、区間ごとの乗り方を求める。
+// 戻り値: { order, legs, totalKm, guessed: [駅], broken: [区間の番号], passed: [通る駅すべて（順番どおり・重なり無し）] }
+function planFixedRoute(units) {
+  const g = routeGraph();
+  const { legs, guessed, broken } = routeLegs(g, units);
+  const passed = [];
+  const seen = new Set();
+  const addPassed = u => { if (!seen.has(u)) { seen.add(u); passed.push(u); } };
+  units.forEach((u, i) => {
+    addPassed(u);
+    const leg = legs[i];
+    if (leg) for (const r of leg.rides) for (const v of r.path) addPassed(v);
+  });
   return {
-    order: orderUnits,
+    order: units,
     legs,
-    totalKm: legs.reduce((s, l) => s + l.km, 0),
-    unreachable: unreachable.map(i => typeof i === 'number' ? points[i] : i),
+    totalKm: legs.reduce((s, l) => s + (isFinite(l.km) ? l.km : 0), 0),
     guessed: [...guessed],
+    broken,
+    passed,
   };
 }

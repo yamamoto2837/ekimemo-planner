@@ -214,7 +214,34 @@
   <!-- ===== 遠征プラン（F8） ===== -->
   <section id="plans" class="screen" hidden>
     <h2>遠征プラン</h2>
-    <p class="help">巡回ルートで保存したプランです。押すと中身が開きます。各駅の「✓」は、いまアクセス済みの駅です。</p>
+    <p class="help">巡回ルートで保存したプランと、自分で作ったルートです。押すと中身が開きます。各駅の「✓」は、いまアクセス済みの駅です。</p>
+
+    <!-- 自分でルートを作る（myroute.js） -->
+    <details class="panel myroute" id="myRouteBox">
+      <summary>自分でルートを作る</summary>
+      <p class="help">回りたい駅を「→」でつないで入れてください（例: 境港→米子→鳥取→津山）。「、」や改行で区切っても構いません。駅と駅の間は、線路に沿っていちばん短い道で考えます。通りたい路線があるときは、途中の駅も入れてください。ルート名が空のときは「境港→津山」のように名前を付けます。</p>
+      <div class="myroute-form">
+        <label class="select-label">ルート名
+          <input type="text" id="myRouteName" maxlength="60" placeholder="例: 山陰・美作めぐり">
+        </label>
+        <label class="select-label">日付
+          <input type="date" id="myRouteDate">
+        </label>
+        <label class="select-label">駅の順番
+          <textarea id="myRouteStations" rows="2" placeholder="境港→米子→鳥取→津山"></textarea>
+        </label>
+      </div>
+      <div class="buttons"><button type="button" id="myRouteCheck">ルートを確かめる</button></div>
+      <p id="myRouteMessage" class="message"></p>
+      <div id="myRouteResult"></div>
+      <label class="memo-label">
+        <span>メモ</span>
+        <textarea id="myRouteNote" class="memo-text" rows="2" maxlength="4000" placeholder="例: 米子で昼ごはん。鳥取→津山は本数が少ないので時刻を確認"></textarea>
+      </label>
+      <div class="buttons"><button type="button" class="primary" id="myRouteSave" disabled>プランとして保存</button></div>
+      <p id="myRouteSaveMessage" class="message"></p>
+    </details>
+
     <div id="planList"></div>
   </section>
 
@@ -337,6 +364,7 @@
 <script src="js/routeplan.js"></script>
 <script src="js/route.js"></script>
 <script src="js/plans.js"></script>
+<script src="js/myroute.js"></script>
 <script src="js/radarplan.js"></script>
 <script src="js/radar.js"></script>
 <script src="js/updates.js"></script>
