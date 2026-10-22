@@ -393,6 +393,23 @@ select {
   box-shadow: 0 0 2px rgba(0, 0, 0, .5);
 }
 
+/* ---------- 駅マスタの更新 ---------- */
+.update-banner {
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  font-size: 14px;
+  text-align: center;
+}
+.update-banner a { color: var(--accent); font-weight: bold; }
+.update-banner.important { background: var(--warn-bg); }
+.update-banner.important a { color: var(--warn); }
+.update-important { color: var(--warn); }
+.update-list { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; max-height: 320px; overflow: auto; }
+.update-list a { color: var(--accent); }
+.update-section { margin-top: 8px; font-size: 14px; }
+.update-section summary { cursor: pointer; color: var(--accent); }
+
 /* ---------- レーダー ---------- */
 #radarN, #radarCount {
   font: inherit; font-size: 15px; padding: 6px 10px; width: 100%;

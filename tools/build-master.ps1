@@ -421,10 +421,121 @@ foreach ($a in $aliasRows) {
 }
 
 # ------------------------------------------------------------
+# 7b. 前の駅マスタと比べる（F10：新駅・廃駅の差分の知らせ）
+#     いまある master/master.js（前回作ったもの）と比べて、変わったことを
+#     master/changes.js に書き足す。アプリはこれを見て知らせる。
+#     駅は駅コードで突き合わせる（「駅メモの駅」の番号は、乗換駅が増えると変わることがあるため）。
+# ------------------------------------------------------------
+$builtAt = Get-Date -Format 'yyyy-MM-dd HH:mm'
+$changesFile = Join-Path $outDir 'changes.js'
+$CHANGES_KEEP = 20   # 残しておく更新の記録の数
+
+function Read-JsData($path) {
+  # window.XXX = {...}; の形のファイルから、中身を読み出す
+  if (-not (Test-Path $path)) { return $null }
+  $txt = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+  $start = $txt.IndexOf('='); $end = $txt.LastIndexOf(';')
+  if ($start -lt 0 -or $end -le $start) { return $null }
+  Add-Type -AssemblyName System.Web.Extensions
+  $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+  $ser.MaxJsonLength = [int]::MaxValue
+  return $ser.DeserializeObject($txt.Substring($start + 1, $end - $start - 1).Trim())
+}
+
+$old = Read-JsData (Join-Path $outDir 'master.js')
+$changeEntry = $null
+if ($old) {
+  # 前の駅マスタ：駅コード → 駅メモの駅、駅メモの駅 → 通る路線
+  $oldUnitOf = @{}
+  foreach ($c in $old.stations.Keys) { $oldUnitOf[$c] = $old.stations[$c]['u'] }
+  $oldLinesOf = @{}
+  foreach ($lc in $old.lines.Keys) {
+    foreach ($c in $old.lines[$lc]['stations']) {
+      $ou = $oldUnitOf[$c]
+      if (-not $oldLinesOf.ContainsKey($ou)) { $oldLinesOf[$ou] = @{} }
+      $oldLinesOf[$ou][$lc] = $true
+    }
+  }
+  # 今の駅マスタ：駅メモの駅 → 通る路線
+  $newLinesOf = @{}
+  foreach ($lc in $lines.Keys) {
+    foreach ($c in $lines[$lc].stations) {
+      $nu = $stations[$c]['u']
+      if (-not $newLinesOf.ContainsKey($nu)) { $newLinesOf[$nu] = @{} }
+      $newLinesOf[$nu][$lc] = $true
+    }
+  }
+
+  $added = New-Object System.Collections.ArrayList
+  $closedNow = New-Object System.Collections.ArrayList
+  $reopened = New-Object System.Collections.ArrayList
+  $lineAdded = [ordered]@{}
+  $matchedOld = @{}
+  foreach ($u in $units.Keys) {
+    $unit = $units[$u]
+    $olds = @($unit.codes | Where-Object { $oldUnitOf.ContainsKey($_) } | ForEach-Object { $oldUnitOf[$_] } | Select-Object -Unique)
+    $olds | ForEach-Object { $matchedOld[$_] = $true }
+    $info = [ordered]@{ u = $u; name = $unit.name; pref = $unit.pref }
+    if ($olds.Count -eq 0) {
+      [void]$added.Add($info)                       # 新しく加わった駅
+    } else {
+      $o = $old.units[$olds[0]]
+      if ($unit.closed -and -not $o['closed']) { [void]$closedNow.Add($info) }   # 廃駅になった
+      if (-not $unit.closed -and $o['closed']) { [void]$reopened.Add($info) }    # 現役に戻った
+    }
+    # 路線に加わった駅（前はその路線に無かった）
+    $oldLines = @{}
+    foreach ($ou in $olds) { if ($oldLinesOf.ContainsKey($ou)) { foreach ($k in $oldLinesOf[$ou].Keys) { $oldLines[$k] = $true } } }
+    if ($newLinesOf.ContainsKey($u)) {
+      foreach ($lc in $newLinesOf[$u].Keys) {
+        if ($oldLines.ContainsKey($lc)) { continue }
+        if (-not $lineAdded.Contains($lc)) { $lineAdded[$lc] = New-Object System.Collections.ArrayList }
+        [void]$lineAdded[$lc].Add($u)
+      }
+    }
+  }
+  # 無くなった駅（前の駅メモの駅で、今の駅マスタに駅コードが1つも残っていないもの）
+  $removed = New-Object System.Collections.ArrayList
+  foreach ($ou in $old.units.Keys) {
+    if ($matchedOld.ContainsKey($ou)) { continue }
+    $o = $old.units[$ou]
+    [void]$removed.Add([ordered]@{ name = $o['name']; pref = $o['pref'] })
+  }
+  # 名前が変わった路線
+  $renamed = New-Object System.Collections.ArrayList
+  foreach ($lc in $lines.Keys) {
+    if ($old.lines.ContainsKey($lc) -and $old.lines[$lc]['name'] -ne $lines[$lc].name) {
+      [void]$renamed.Add([ordered]@{ line = $lc; from = $old.lines[$lc]['name']; to = $lines[$lc].name })
+    }
+  }
+
+  $total = $added.Count + $closedNow.Count + $reopened.Count + $removed.Count + $lineAdded.Count + $renamed.Count
+  if ($total -gt 0) {
+    $changeEntry = [ordered]@{
+      builtAt = $builtAt; from = $old.builtAt
+      added = $added; closed = $closedNow; reopened = $reopened; removed = $removed
+      lineAdded = $lineAdded; renamedLines = $renamed
+    }
+  }
+}
+
+# 更新の記録を書き足す（新しいものを先頭に。古いものは捨てる）
+$history = New-Object System.Collections.ArrayList
+$oldHistory = Read-JsData $changesFile
+if ($changeEntry) { [void]$history.Add($changeEntry) }
+if ($oldHistory) { foreach ($h in $oldHistory) { if ($history.Count -lt $CHANGES_KEEP) { [void]$history.Add($h) } } }
+New-Item -ItemType Directory -Force $outDir | Out-Null
+$historyJson = ConvertTo-Json -InputObject @($history) -Depth 6 -Compress
+if ($history.Count -eq 0) { $historyJson = '[]' }
+$changesText = "// 自動生成ファイル（tools/build-master.ps1）。駅マスタの更新の記録（新しい順）。`n" +
+               "window.EKIMEMO_CHANGES = $historyJson;`n"
+[IO.File]::WriteAllText($changesFile, $changesText, (New-Object Text.UTF8Encoding $false))
+
+# ------------------------------------------------------------
 # 8. 書き出し
 # ------------------------------------------------------------
 $master = [ordered]@{
-  builtAt = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+  builtAt = $builtAt
   sources = [ordered]@{ station = $stationFile.Name; line = $lineFile.Name; join = $joinFile.Name }
   stations = $stations
   units    = $units
@@ -461,5 +572,10 @@ Write-Host "路線名の修正（line_names）   : 名前を変えた $renamedLi
 Write-Host "旧コード対応表               : $($aliases.Count) 件"
 Write-Host "e_sort と接続順が違った路線  : $($reordered.Count) 本（接続順を採用）"
 $reordered | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" }
+if ($changeEntry) {
+  Write-Host "前回（$($changeEntry.from)）との違い: 新駅 $($changeEntry.added.Count) / 廃駅になった $($changeEntry.closed.Count) / 現役に戻った $($changeEntry.reopened.Count) / 無くなった $($changeEntry.removed.Count) / 駅が加わった路線 $($changeEntry.lineAdded.Count) / 名前が変わった路線 $($changeEntry.renamedLines.Count)"
+} elseif ($old) {
+  Write-Host "前回（$($old.builtAt)）との違い: なし"
+}
 Write-Host ""
 Write-Host "出力: $outFile ($([math]::Round((Get-Item $outFile).Length / 1KB)) KB)"
