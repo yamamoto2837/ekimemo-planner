@@ -1,0 +1,231 @@
+// ============================================================
+// 路線別残り駅一覧（F3）
+//
+// 選んだ路線の全駅を、路線の並び順で縦に並べ、未アクセスの駅を色分けする。
+// 「路線の端が丸ごと残っている」のか「途中の1駅だけ抜けている」のかが
+// わかるよう、未アクセスの区間のまとめも出す。
+// ============================================================
+
+let currentLineCd = null;      // 表示中の路線コード
+const MAX_FIND_RESULTS = 50;   // 路線を探したときに並べる上限
+const MAX_TRANSFERS = 6;       // 1駅で並べる乗換路線の上限
+
+// ---------- 準備（app.js から呼ばれる） ----------
+
+function initLineScreen() {
+  document.getElementById('lineFind').addEventListener('input', renderLineFind);
+}
+
+// ---------- 路線を探す ----------
+
+function renderLineFind() {
+  const word = document.getElementById('lineFind').value.trim();
+  const box = document.getElementById('lineFindResults');
+  box.replaceChildren();
+  if (!word) return;
+
+  const stats = getLineStats();
+  const remainOf = {};
+  if (stats) for (const s of stats) remainOf[s.cd] = s.remainingActive.length;
+
+  const hits = Object.entries(MASTER.lines)
+    .filter(([, l]) => l.name.includes(word))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+  for (const [cd, l] of hits.slice(0, MAX_FIND_RESULTS)) {
+    const li = el('li', '');
+    const a = el('a', '', l.name);
+    a.href = lineHref(cd);
+    li.append(a);
+    if (cd in remainOf) {
+      li.append(' ', el('span', remainOf[cd] === 0 ? 'muted' : 'remain', remainOf[cd] === 0 ? 'コンプ' : `残り ${remainOf[cd]} 駅`));
+    }
+    box.append(li);
+  }
+  if (hits.length === 0) box.append(el('li', 'muted', '見つかりません。'));
+  if (hits.length > MAX_FIND_RESULTS) box.append(el('li', 'muted', `ほか ${hits.length - MAX_FIND_RESULTS} 路線（もう少し詳しく入力してください）`));
+}
+
+// ---------- 路線の駅を並べる ----------
+
+// 路線の駅を、駅メモの駅で重なりを除いて並べる
+function lineRows(line, accessed) {
+  const rows = [];
+  const seen = new Set();
+  for (const sc of line.stations) {
+    const station = MASTER.stations[sc];
+    if (seen.has(station.u)) continue;
+    seen.add(station.u);
+    const unit = MASTER.units[station.u];
+    let status = 'done';
+    if (!accessed.has(station.u)) status = unit.closed ? 'closed' : 'todo';
+    rows.push({ sc, station, unit, status });
+  }
+  return rows;
+}
+
+// 未アクセス（行ける駅）の区間をまとめる。
+// アクセス済みの駅で区切る。行けない廃駅は区切りにも数にも入れない。
+function todoSegments(rows) {
+  const segments = [];
+  let cur = null;
+  let seenDoneBefore = false;
+  for (const r of rows) {
+    if (r.status === 'todo') {
+      if (!cur) cur = { first: r, last: r, count: 0, atStart: !seenDoneBefore, atEnd: false };
+      cur.last = r;
+      cur.count++;
+    } else if (r.status === 'done') {
+      if (cur) { segments.push(cur); cur = null; }
+      seenDoneBefore = true;
+    }
+  }
+  if (cur) { cur.atEnd = true; segments.push(cur); }
+  return segments;
+}
+
+// 区間の位置の言い方
+function segmentPlace(seg, shape) {
+  if (shape !== 'path') return '';            // 一本道でないときは端かどうか言えない
+  if (seg.atStart && seg.atEnd) return '全区間';
+  if (seg.atStart) return '起点側の端';
+  if (seg.atEnd) return '終点側の端';
+  return '途中';
+}
+
+// その駅で乗り換えられる、ほかの路線
+function transferLines(unit, lineCd) {
+  const result = [];
+  const seen = new Set([lineCd]);
+  for (const c of unit.codes) {
+    const lc = MASTER.stations[c].line;
+    if (seen.has(lc) || !MASTER.lines[lc]) continue;
+    seen.add(lc);
+    result.push(lc);
+  }
+  return result;
+}
+
+// ---------- 描画 ----------
+
+// cd を渡すとその路線に切り替える。渡さなければ表示中の路線を描き直す。
+function renderLineDetail(cd) {
+  if (cd !== undefined) currentLineCd = cd;
+  const box = document.getElementById('lineDetail');
+  box.replaceChildren();
+
+  const line = currentLineCd && hasKey(MASTER.lines, currentLineCd) ? MASTER.lines[currentLineCd] : null;
+  if (!line) {
+    box.append(el('p', 'muted', currentLineCd
+      ? 'この路線は見つかりませんでした。上の欄から探してください。'
+      : '上の欄で路線を探すか、取りこぼし回収リストの路線名を押してください。'));
+    return;
+  }
+
+  const accessed = appState.resolved ? appState.resolved.accessed : new Set();
+  const rows = lineRows(line, accessed);
+  const active = rows.filter(r => r.status !== 'closed' && !r.unit.closed);
+  const done = active.filter(r => r.status === 'done').length;
+  const todo = rows.filter(r => r.status === 'todo').length;
+
+  // --- 見出しと数字 ---
+  const head = el('div', 'panel');
+  const title = el('h3', 'detail-title', line.name);
+  if (line.closed) title.append(' ', el('span', 'tag', '廃線'));
+  head.append(title);
+
+  if (!appState.resolved) {
+    head.append(el('p', 'notice', '進捗が取り込まれていないので、全駅を未アクセスとして表示しています。'));
+  }
+  let countText;
+  if (active.length === 0) {
+    // 全駅が廃駅の路線（もう行けないので、アクセス済みの数だけ出す）
+    const closedDone = rows.filter(r => r.status === 'done').length;
+    countText = `全駅が廃駅です（${rows.length} 駅中 ${closedDone} 駅アクセス済み）`;
+  } else if (todo === 0) {
+    countText = `コンプ済み（全 ${active.length} 駅）`;
+  } else {
+    countText = `残り ${todo} 駅 ／ 全 ${active.length} 駅中 ${done} 駅アクセス済み（${formatRate(done, active.length)}）`;
+  }
+  head.append(el('p', 'detail-count', countText));
+  const bar = el('div', 'bar');
+  const fill = el('div', 'bar-fill');
+  fill.style.width = (active.length ? done / active.length * 100 : 0) + '%';
+  bar.append(fill);
+  head.append(bar);
+
+  // 地図へ
+  const links = el('p', 'detail-links');
+  const mapLink = el('a', '', 'この路線を地図で見る');
+  mapLink.href = '#map/line/' + encodeURIComponent(currentLineCd);
+  links.append(mapLink);
+  head.append(links);
+
+  // 並び順についての注意
+  if (line.shape === 'branch' || line.shape === 'loop') {
+    head.append(el('p', 'help', line.shape === 'loop'
+      ? '環状の路線です。どこから並べても同じなので、駅データの順で並べています。'
+      : '分岐がある路線です。駅データの順で並べているので、分かれた先が続けて並ぶことがあります。'));
+  }
+  if (line.estimated) {
+    head.append(el('p', 'help', '駅データ.jp に無い駅を含むため、並び順は位置から推定しています。'));
+  }
+
+  // --- 未アクセスの区間のまとめ ---
+  const segs = todoSegments(rows);
+  if (segs.length > 0) {
+    head.append(el('h4', '', '未アクセスの区間'));
+    const ul = el('ul', 'segments');
+    for (const s of segs) {
+      const name = s.count === 1 ? s.first.unit.name : `${s.first.unit.name}〜${s.last.unit.name}`;
+      const place = segmentPlace(s, line.shape);
+      const li = el('li', '');
+      if (place) li.append(el('span', 'seg-place', place));
+      li.append(`${name}（${s.count} 駅）`);
+      ul.append(li);
+    }
+    head.append(ul);
+  }
+
+  // --- 全駅の並び ---
+  const list = el('ol', 'route');
+  rows.forEach(r => list.append(stationRow(r, currentLineCd)));
+  const legend = el('p', 'legend');
+  legend.append(
+    el('span', 'lg lg-todo', '未アクセス'),
+    el('span', 'lg lg-done', 'アクセス済み'),
+    el('span', 'lg lg-closed', '廃駅（未アクセス）'));
+
+  const routePanel = el('div', 'panel');
+  routePanel.append(legend, list);
+  box.append(head, routePanel);
+}
+
+// 駅1つ分の行
+function stationRow(r, lineCd) {
+  const li = el('li', 'st st-' + r.status);
+  li.append(el('span', 'dot'));
+
+  const body = el('div', 'st-body');
+  const name = el('span', 'st-name', r.station.name);
+  body.append(name, el('small', 'muted', `（${prefName(r.unit.pref)}）`));
+  if (r.status === 'todo') body.append(' ', el('span', 'badge-todo', '未アクセス'));
+  if (r.unit.closed) body.append(' ', el('span', 'tag', '廃駅'));
+  if (r.unit.name !== r.station.name) body.append(el('div', 'st-note', `駅メモでは「${r.unit.name}」として数えます`));
+
+  // 乗換できる路線（押すとその路線の詳細へ）
+  const transfers = transferLines(r.unit, lineCd);
+  if (transfers.length > 0) {
+    const t = el('div', 'st-transfer', '乗換: ');
+    transfers.slice(0, MAX_TRANSFERS).forEach((lc, i) => {
+      if (i > 0) t.append('、');
+      const a = el('a', '', MASTER.lines[lc].name);
+      a.href = lineHref(lc);
+      t.append(a);
+    });
+    if (transfers.length > MAX_TRANSFERS) t.append(` ほか ${transfers.length - MAX_TRANSFERS} 路線`);
+    body.append(t);
+  }
+
+  li.append(body);
+  return li;
+}

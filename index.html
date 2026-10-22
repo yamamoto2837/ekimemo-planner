@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>駅メモ全駅アクセス計画</title>
+<!-- 地図の部品（Leaflet） -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <h1>駅メモ全駅アクセス計画</h1>
+  <!-- 画面の切り替え -->
+  <nav class="tabs" aria-label="画面の切り替え">
+    <a href="#collect" data-screen="collect">取りこぼし回収</a>
+    <a href="#line" data-screen="line">路線詳細</a>
+    <a href="#pref" data-screen="pref">地域別</a>
+    <a href="#map" data-screen="map">地図</a>
+    <a href="#import" data-screen="import">データ取り込み</a>
+  </nav>
+</header>
+
+<main class="app-main">
+
+  <!-- ===== 取りこぼし回収リスト（F2） ===== -->
+  <section id="collect" class="screen" hidden>
+    <h2>取りこぼし回収リスト</h2>
+    <p class="help">あと少しでコンプする路線を、残りの駅が少ない順に並べています。</p>
+
+    <div id="collectEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="collectBody" hidden>
+      <!-- 絞り込み -->
+      <div class="panel filters">
+        <div class="chips" id="remainChips" role="group" aria-label="残りの駅数で絞り込み"></div>
+        <div class="filter-row">
+          <input type="search" id="lineSearch" placeholder="路線名で絞り込み（例: 京急）">
+          <label class="check"><input type="checkbox" id="countClosed"> 廃駅も残りに数える</label>
+        </div>
+      </div>
+      <p id="collectCount" class="muted"></p>
+      <ol id="lineList" class="line-list"></ol>
+    </div>
+  </section>
+
+  <!-- ===== 路線別残り駅一覧（F3） ===== -->
+  <section id="line" class="screen" hidden>
+    <h2>路線詳細</h2>
+    <div class="panel">
+      <label for="lineFind" class="label">路線を探す</label>
+      <input type="search" id="lineFind" placeholder="路線名の一部（例: 山田線）">
+      <ul id="lineFindResults" class="find-results"></ul>
+    </div>
+    <div id="lineDetail"></div>
+  </section>
+
+  <!-- ===== 地域別進捗（F4） ===== -->
+  <section id="pref" class="screen" hidden>
+    <h2>地域別進捗</h2>
+    <p class="help">都道府県ごとの達成率と残りの駅数です。都道府県を押すと、残りの駅を路線ごとに表示します。</p>
+
+    <div id="prefEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="prefBody" hidden>
+      <div class="cards region-cards" id="regionCards"></div>
+      <div class="chips pref-sort" id="prefSortChips" role="group" aria-label="並べ替え"></div>
+      <p class="help">達成率は廃駅も含めた全駅で計算しています。「残り」は行ける駅（廃駅を除く）の数です。</p>
+      <ol id="prefList" class="pref-list"></ol>
+    </div>
+  </section>
+
+  <!-- ===== 地図表示（F5） ===== -->
+  <section id="map" class="screen" hidden>
+    <h2>地図</h2>
+
+    <div id="mapEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="mapBody" hidden>
+      <div class="panel filters">
+        <div class="filter-row">
+          <label class="select-label">都道府県
+            <select id="mapPref"></select>
+          </label>
+          <label class="select-label">路線
+            <select id="mapLine"></select>
+          </label>
+        </div>
+        <div class="filter-row">
+          <label class="check"><input type="checkbox" id="mapShowClosed"> 廃駅も表示</label>
+          <label class="check"><input type="checkbox" id="mapShowDone"> アクセス済みも表示</label>
+        </div>
+      </div>
+      <p id="mapCount" class="muted"></p>
+      <div id="mapView" class="map-view"></div>
+      <p class="legend map-legend">
+        <span class="lg lg-todo">未アクセス</span>
+        <span class="lg lg-closed">廃駅（未アクセス）</span>
+        <span class="lg lg-done">アクセス済み</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== データ取り込み画面（F1） ===== -->
+  <section id="import" class="screen" hidden>
+    <h2>データ取り込み</h2>
+
+    <!-- いま保存されている進捗 -->
+    <div class="panel" id="savedStatus">
+      <p class="muted">保存された進捗を読み込み中…</p>
+    </div>
+
+    <!-- 貼り付け欄 -->
+    <div class="panel">
+      <label for="exportText" class="label">駅メモマップ2のエクスポート文字列</label>
+      <p class="help">
+        駅メモマップ2の「データエクスポート」で表示された文字列を、
+        最初の <code>[</code> から最後の <code>]</code> まで全部貼り付けてください。
+      </p>
+      <textarea id="exportText" rows="6" spellcheck="false"
+        placeholder='["1132609","1132608", ...]'></textarea>
+      <div class="buttons">
+        <button type="button" id="readButton" class="primary">読み込む</button>
+        <button type="button" id="clearButton">貼り付け欄を空にする</button>
+      </div>
+      <p id="readMessage" class="message" role="status"></p>
+    </div>
+
+    <!-- 読み込んだ結果（保存前の確認） -->
+    <div class="panel" id="resultPanel" hidden>
+      <h3>読み込んだ結果</h3>
+      <div class="cards" id="resultCards"></div>
+
+      <div id="diffBox"></div>
+
+      <h4>マスタに無いID</h4>
+      <p class="help">駅マスタで見つからなかったIDです。達成率には入りません。</p>
+      <div id="unknownBox"></div>
+
+      <div class="buttons">
+        <button type="button" id="saveButton" class="primary">この内容で保存する</button>
+      </div>
+      <p id="saveMessage" class="message" role="status"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <p>駅データ：<a href="https://ekidata.jp/" target="_blank" rel="noopener">駅データ.jp</a> を加工して使用</p>
+  <p id="masterInfo" class="muted"></p>
+</footer>
+
+<!-- 地図の部品（Leaflet）。読み込めなくても、地図以外の画面は使える -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- 駅マスタ（tools/build-master.ps1 で作ったもの） -->
+<script src="master/master.js"></script>
+<!-- アプリの処理（app.js が全体のまとめ役。画面の準備は全部読み込んでから始める） -->
+<script src="js/app.js"></script>
+<script src="js/db.js"></script>
+<script src="js/progress.js"></script>
+<script src="js/prefs.js"></script>
+<script src="js/import.js"></script>
+<script src="js/collect.js"></script>
+<script src="js/linedetail.js"></script>
+<script src="js/region.js"></script>
+<script src="js/map.js"></script>
+</body>
+</html>

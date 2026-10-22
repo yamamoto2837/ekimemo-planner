@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>駅マスタ確認</title>
+<style>
+  /* 確認用の簡単な見た目 */
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #fafafa; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; min-width: 140px; }
+  .card b { display: block; font-size: 22px; }
+  .card span { font-size: 12px; color: #666; }
+  table { border-collapse: collapse; background: #fff; width: 100%; max-width: 720px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; font-size: 14px; text-align: left; }
+  th { background: #eee; }
+  tr.closed td { color: #999; background: #f3f3f3; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fbe3e3; color: #a33; }
+  input, select { font-size: 14px; padding: 4px; max-width: 100%; }
+  .muted { color: #666; font-size: 13px; }
+  .error { color: #b00; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>駅マスタ確認</h1>
+<p class="muted" id="built"></p>
+
+<div class="cards" id="summary"></div>
+
+<h2>路線ごとの駅順</h2>
+<p>
+  <input id="filter" placeholder="路線名で絞り込み（例: 日高）">
+  <select id="lineSelect"></select>
+</p>
+<p class="muted" id="lineInfo"></p>
+<table>
+  <thead><tr><th>#</th><th>駅名</th><th>駅コード</th><th>他の路線</th><th>状態</th></tr></thead>
+  <tbody id="stationRows"></tbody>
+</table>
+
+<h2>進捗データの読み込み確認（data/progress.json）</h2>
+<p class="muted">tools\serve.ps1 で開いたときだけ表示されます。</p>
+<div class="cards" id="progressSummary"></div>
+<p id="progressMissing"></p>
+
+<h2>旧コード対応表</h2>
+<table>
+  <thead><tr><th>旧コード</th><th>今のコード</th><th>駅名</th><th>路線</th></tr></thead>
+  <tbody id="aliasRows"></tbody>
+</table>
+
+<!-- 変換で作ったマスタデータを読み込む -->
+<script src="../master/master.js"></script>
+<script>
+  // マスタが読めなかったときは案内を出して止める
+  const M = window.EKIMEMO_MASTER;
+  if (!M) {
+    document.body.insertAdjacentHTML('afterbegin',
+      '<p class="error">master/master.js が読めません。先に tools\\build-master.ps1 を実行してください。</p>');
+    throw new Error('master not loaded');
+  }
+
+  document.getElementById('built').textContent =
+    `作成日時 ${M.builtAt} ／ 元データ ${M.sources.station}, ${M.sources.line}, ${M.sources.join}`;
+
+  // --- 全体の数字 ---
+  // units = 駅メモの駅（数える単位）
+  const units = Object.values(M.units);
+  const lines = Object.entries(M.lines);
+  const shapes = { path: 0, branch: 0, loop: 0, nojoin: 0 };
+  lines.forEach(([, l]) => shapes[l.shape]++);
+  const cards = [
+    ['駅メモの駅数', units.length],
+    ['うち現役', units.filter(u => !u.closed).length],
+    ['うち廃駅', units.filter(u => u.closed).length],
+    ['駅コード数', Object.keys(M.stations).length],
+    ['路線数', lines.length],
+    ['一本道 / 分岐 / 環状 / 接続なし', `${shapes.path} / ${shapes.branch} / ${shapes.loop} / ${shapes.nojoin}`],
+  ];
+  document.getElementById('summary').innerHTML =
+    cards.map(([label, v]) => `<div class="card"><b>${v}</b><span>${label}</span></div>`).join('');
+
+  // --- 路線の選択肢 ---
+  const select = document.getElementById('lineSelect');
+  const filter = document.getElementById('filter');
+  const shapeName = { path: '一本道', branch: '分岐あり', loop: '環状', nojoin: '接続データなし' };
+
+  function fillLines() {
+    const word = filter.value.trim();
+    const hit = lines.filter(([, l]) => !word || l.name.includes(word));
+    select.innerHTML = hit.map(([cd, l]) =>
+      `<option value="${cd}">${l.name}（${l.stations.length}駅）${l.closed ? '［廃線］' : ''}</option>`).join('');
+    showLine();
+  }
+
+  // --- 選んだ路線の駅を順番に表示 ---
+  function showLine() {
+    const cd = select.value;
+    const tbody = document.getElementById('stationRows');
+    if (!cd) { tbody.innerHTML = ''; return; }
+    const line = M.lines[cd];
+    document.getElementById('lineInfo').textContent =
+      `路線コード ${cd} ／ 形: ${shapeName[line.shape]} ／ 接続データ ${(M.joins[cd] || []).length} 組` +
+      (line.estimated ? ' ／ 追加駅を含むため並び順は推定' : '');
+    tbody.innerHTML = line.stations.map((sc, i) => {
+      const s = M.stations[sc];
+      // 同じ「駅メモの駅」に属する、他の路線の名前
+      const others = M.units[s.u].codes.filter(c => c !== sc)
+        .map(c => M.lines[M.stations[c].line]?.name).filter(Boolean);
+      return `<tr class="${s.closed ? 'closed' : ''}"><td>${i + 1}</td><td>${s.name}</td><td>${sc}</td>` +
+        `<td>${others.join('、')}</td><td>${s.closed ? '<span class="tag">廃駅</span> ' : ''}${s.extra ? '<span class="tag">追加駅</span>' : ''}</td></tr>`;
+    }).join('');
+  }
+
+  filter.addEventListener('input', fillLines);
+  select.addEventListener('change', showLine);
+  fillLines();
+
+  // --- 進捗データの読み込み確認 ---
+  // エクスポートの各IDを「対応表で読み替え」「そのまま」「読めない」に分け、駅メモの駅単位で数える。
+  // 対応表を先に見る（駅データ.jp と同じ番号でも、駅メモでは別の駅を指すものがあるため）。
+  fetch('../data/progress.json').then(r => r.json()).then(ids => {
+    let direct = 0, viaAlias = 0;
+    const missing = [];
+    const accessedUnits = new Set();
+    let sameUnit = 0;   // 同じ駅メモの駅に、2つ以上のIDが当たった数
+    ids.map(String).forEach(id => {
+      let cd = id;
+      if (M.aliases[cd] && M.stations[M.aliases[cd]]) { cd = M.aliases[cd]; viaAlias++; }
+      else if (M.stations[cd]) direct++;
+      else { missing.push(id); return; }
+      const u = M.stations[cd].u;
+      if (accessedUnits.has(u)) sameUnit++;
+      accessedUnits.add(u);
+    });
+    const closedAccessed = [...accessedUnits].filter(u => M.units[u].closed).length;
+    const items = [
+      ['エクスポートのID数', ids.length],
+      ['そのまま読めた', direct],
+      ['対応表で読み替え', viaAlias],
+      ['読めなかった', missing.length],
+      ['アクセス済みの駅メモの駅', accessedUnits.size],
+      ['うち廃駅', closedAccessed],
+      ['同じ駅に重なったID', sameUnit],
+    ];
+    document.getElementById('progressSummary').innerHTML =
+      items.map(([label, v]) => `<div class="card"><b>${v}</b><span>${label}</span></div>`).join('');
+    document.getElementById('progressMissing').textContent =
+      missing.length ? `読めなかったID: ${missing.join(', ')}` : '全IDをマスタの駅として読めました。';
+  }).catch(() => {
+    document.getElementById('progressSummary').innerHTML = '<span class="muted">（読み込めませんでした）</span>';
+  });
+
+  // --- 旧コード対応表 ---
+  document.getElementById('aliasRows').innerHTML = Object.entries(M.aliases).map(([oldCd, newCd]) => {
+    const s = M.stations[newCd];
+    return `<tr><td>${oldCd}</td><td>${newCd}</td><td>${s.name}</td><td>${M.lines[s.line]?.name ?? ''}</td></tr>`;
+  }).join('');
+</script>
+</body>
+</html>
