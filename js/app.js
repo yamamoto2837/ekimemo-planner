@@ -13,7 +13,7 @@ const appState = {
   resolved: null,   // 進捗を駅マスタに当てはめた結果（resolveProgress の戻り値）
 };
 
-const SCREENS = ['collect', 'line', 'pref', 'map', 'near', 'route', 'plans', 'import'];
+const SCREENS = ['collect', 'line', 'pref', 'map', 'near', 'radar', 'route', 'plans', 'import'];
 
 // 路線ごとの集計（progress.js の computeLineStats）。進捗が変わったときだけ作り直す。
 let lineStatsCache = null;
@@ -65,6 +65,7 @@ function setProgress(progress) {
   renderNear();          // near.js
   renderRoute();         // route.js
   renderPlans();         // plans.js（「アクセス済み」の印を最新にする）
+  renderRadar();         // radar.js
 }
 
 // 画面の切り替え
@@ -89,6 +90,11 @@ function showScreenFromHash() {
     selectPlan(rest.length > 0 ? decodeURIComponent(rest[0]) : null);   // #plans/プランの番号 なら、そのプランを開く
     showScreen(name);
     window.scrollTo(0, 0);
+    return;
+  }
+  if (name === 'radar') {
+    showScreen(name);
+    onRadarShown();   // 地図があれば、表示されてから大きさを測り直す
     return;
   }
   if (name === 'route') {
@@ -134,6 +140,7 @@ async function startApp() {
   initSyncScreen();      // sync.js（共有の設定を読む）
   initRouteScreen();     // route.js
   initPlansScreen();     // plans.js
+  initRadarScreen();     // radar.js
 
   // メモは進捗が無くても使えるので、先に読み込む（memo.js）
   await loadMemos();

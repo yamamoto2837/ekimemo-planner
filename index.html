@@ -20,6 +20,7 @@
     <a href="#near" data-screen="near">近くの駅</a>
     <a href="#collect" data-screen="collect">取りこぼし回収</a>
     <a href="#line" data-screen="line">路線詳細</a>
+    <a href="#radar" data-screen="radar">レーダー</a>
     <a href="#route" data-screen="route">巡回ルート</a>
     <a href="#plans" data-screen="plans">遠征プラン</a>
     <a href="#import" data-screen="import">データ取り込み</a>
@@ -141,6 +142,40 @@
       </div>
       <p id="nearBaseInfo" class="muted"></p>
       <ol id="nearList" class="near-list"></ol>
+    </div>
+  </section>
+
+  <!-- ===== レーダー圏（F9） ===== -->
+  <section id="radar" class="screen" hidden>
+    <h2>レーダー</h2>
+    <p class="help">レーダーで「いる場所から近い順に n 駅」取れる前提で、未アクセスの駅を多く取れる立ち位置を探します。</p>
+
+    <div id="radarEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="radarBody" hidden>
+      <div class="panel filters">
+        <details open class="route-pref-box">
+          <summary id="radarPrefSummary">都道府県を選ぶ</summary>
+          <div id="radarPrefList"></div>
+          <button type="button" id="radarClearPrefs" class="memo-button">選んだ都道府県をすべて外す</button>
+        </details>
+        <div class="filter-row">
+          <label class="select-label">レーダーの駅数（n）
+            <input type="number" id="radarN" min="1" max="50" inputmode="numeric">
+          </label>
+          <label class="select-label">おすすめする地点の数
+            <input type="number" id="radarCount" min="1" max="20" inputmode="numeric">
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="radarClosed"> 廃駅も対象にする（駅メモでは廃駅もレーダーで取れます）</label>
+        <div class="buttons">
+          <button type="button" id="radarRun" class="primary">立ち位置を探す</button>
+        </div>
+        <p id="radarMessage" class="message" role="status"></p>
+      </div>
+      <div id="radarResult"></div>
     </div>
   </section>
 
@@ -289,5 +324,7 @@
 <script src="js/routeplan.js"></script>
 <script src="js/route.js"></script>
 <script src="js/plans.js"></script>
+<script src="js/radarplan.js"></script>
+<script src="js/radar.js"></script>
 </body>
 </html>

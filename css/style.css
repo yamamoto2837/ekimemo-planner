@@ -393,6 +393,12 @@ select {
   box-shadow: 0 0 2px rgba(0, 0, 0, .5);
 }
 
+/* ---------- レーダー ---------- */
+#radarN, #radarCount {
+  font: inherit; font-size: 15px; padding: 6px 10px; width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+}
+
 /* ---------- 遠征プラン ---------- */
 .plan-save input[type="text"] { flex: 2 1 180px; min-width: 0; }
 .plan-save input[type="date"], .plan-save input[type="text"] {
