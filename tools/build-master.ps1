@@ -409,6 +409,49 @@ foreach ($r in ($lineNameRows | Where-Object { $_.name })) {
 }
 
 # ------------------------------------------------------------
+# 6d. 駅メモにだけある路線を足す（data/line_virtual.csv）
+#     駅メモには、ほかの路線と同じ駅を持つ古い名前の路線などがある（北リアス線・旧広電など）。
+#     駅はすでにある駅をそのまま使う（駅数は変わらない）。路線の数え方だけが増える。
+#       name       : 路線名
+#       closed     : 1 なら廃路線
+#       base_lines : 駅を探す路線（; で区切る。名前を直したあとの路線名）
+#       stations   : 駅の並び（| で区切る。駅メモの駅の名前）
+# ------------------------------------------------------------
+$virtualFile = Join-Path $dataDir 'line_virtual.csv'
+$virtualRows = @()
+if (Test-Path $virtualFile) { $virtualRows = @(Import-Csv $virtualFile -Encoding UTF8) }
+$lineCdByName = @{}
+foreach ($lc in $lines.Keys) { if (-not $lineCdByName.ContainsKey($lines[$lc]['name'])) { $lineCdByName[$lines[$lc]['name']] = $lc } }
+$virtualAdded = 0
+foreach ($v in $virtualRows) {
+  # 探す路線の駅：駅メモの駅の名前 → 駅コード（最初に見つかったもの）
+  $codeByName = @{}
+  foreach ($bn in ($v.base_lines -split ';')) {
+    if (-not $lineCdByName.ContainsKey($bn)) { Write-Warning "line_virtual.csv: 「$($v.name)」の base_lines「$bn」がありません"; continue }
+    foreach ($c in $lines[$lineCdByName[$bn]]['stations']) {
+      $un = $units[$stations[$c]['u']].name
+      if (-not $codeByName.ContainsKey($un)) { $codeByName[$un] = $c }
+    }
+  }
+  $codes = New-Object System.Collections.ArrayList
+  foreach ($sn in ($v.stations -split '\|')) {
+    if ($codeByName.ContainsKey($sn)) { [void]$codes.Add($codeByName[$sn]) }
+    else { Write-Warning "line_virtual.csv: 「$($v.name)」の駅「$sn」が見つかりません" }
+  }
+  if ($codes.Count -eq 0) { continue }
+  $lines["v:$($v.name)"] = [ordered]@{
+    name      = $v.name
+    company   = ''
+    closed    = ($v.closed -eq '1')
+    shape     = 'nojoin'
+    estimated = $false
+    virtual   = $true          # 駅メモにだけある路線（駅はほかの路線と同じ）
+    stations  = @($codes)
+  }
+  $virtualAdded++
+}
+
+# ------------------------------------------------------------
 # 7. 旧コードの対応表（data/id_alias.csv）
 #    エクスポートに残っている古い駅コードを、今の駅コードへ読み替える。
 #    読み替えは駅コードを探すより先に行うこと（1122903 のように、駅データ.jp と
@@ -569,6 +612,7 @@ Write-Host "  一本道 $($shapeCount.path) / 分岐 $($shapeCount.branch) / 環
 Write-Host "読み飛ばした接続駅データ     : $skippedJoin 行（マスタに無い駅を含む）"
 Write-Host "追加駅                       : $($extraRows.Count) 駅（$($extraByLine.Count) 路線に配置）"
 Write-Host "路線名の修正（line_names）   : 名前を変えた $renamedLines 路線 / まとめた $mergedLines 路線"
+Write-Host "駅メモにだけある路線（line_virtual）: $virtualAdded 路線を追加"
 Write-Host "旧コード対応表               : $($aliases.Count) 件"
 Write-Host "e_sort と接続順が違った路線  : $($reordered.Count) 本（接続順を採用）"
 $reordered | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" }
