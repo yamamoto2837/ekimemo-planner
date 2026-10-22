@@ -67,7 +67,8 @@ function setProgress(progress) {
 
 // 画面の切り替え
 function showScreen(name) {
-  if (!SCREENS.includes(name)) name = appState.progress ? 'collect' : 'import';
+  // 画面の指定が無いとき：進捗があれば先頭のタブ（地域別）、無ければ取り込み画面
+  if (!SCREENS.includes(name)) name = appState.progress ? 'pref' : 'import';
   for (const s of SCREENS) document.getElementById(s).hidden = (s !== name);
   document.querySelectorAll('.tabs a').forEach(a => {
     if (a.dataset.screen === name) a.setAttribute('aria-current', 'page');

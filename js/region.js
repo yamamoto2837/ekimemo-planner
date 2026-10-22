@@ -10,6 +10,7 @@
 const PREF_SORTS = [
   { value: 'code', label: '北から順' },
   { value: 'remainAsc', label: '残りが少ない順' },
+  { value: 'remainDesc', label: '残りが多い順' },
   { value: 'rateDesc', label: '達成率が高い順' },
   { value: 'rateAsc', label: '達成率が低い順' },
 ];
@@ -76,6 +77,7 @@ function renderRegion() {
   // --- 都道府県の一覧 ---
   const rows = stats.slice(1);
   if (prefSort === 'remainAsc') rows.sort((a, b) => a.remainingActive.length - b.remainingActive.length || a.pref - b.pref);
+  if (prefSort === 'remainDesc') rows.sort((a, b) => b.remainingActive.length - a.remainingActive.length || a.pref - b.pref);
   if (prefSort === 'rateDesc') rows.sort((a, b) => rateOf(b.done, b.total) - rateOf(a.done, a.total) || a.pref - b.pref);
   if (prefSort === 'rateAsc') rows.sort((a, b) => rateOf(a.done, a.total) - rateOf(b.done, b.total) || a.pref - b.pref);
 

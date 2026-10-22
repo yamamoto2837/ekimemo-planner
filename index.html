@@ -15,11 +15,11 @@
   <h1>駅メモ全駅アクセス計画</h1>
   <!-- 画面の切り替え -->
   <nav class="tabs" aria-label="画面の切り替え">
-    <a href="#collect" data-screen="collect">取りこぼし回収</a>
-    <a href="#line" data-screen="line">路線詳細</a>
     <a href="#pref" data-screen="pref">地域別</a>
     <a href="#map" data-screen="map">地図</a>
     <a href="#near" data-screen="near">近くの駅</a>
+    <a href="#collect" data-screen="collect">取りこぼし回収</a>
+    <a href="#line" data-screen="line">路線詳細</a>
     <a href="#import" data-screen="import">データ取り込み</a>
   </nav>
 </header>
@@ -41,7 +41,7 @@
         <div class="chips" id="remainChips" role="group" aria-label="残りの駅数で絞り込み"></div>
         <div class="filter-row">
           <input type="search" id="lineSearch" placeholder="路線名で絞り込み（例: 京急）">
-          <label class="check"><input type="checkbox" id="countClosed"> 廃駅も残りに数える</label>
+          <label class="check"><input type="checkbox" id="excludeClosed" checked> 廃駅を残りに数えない</label>
         </div>
       </div>
       <p id="collectCount" class="muted"></p>
@@ -96,7 +96,7 @@
           </label>
         </div>
         <div class="filter-row">
-          <label class="check"><input type="checkbox" id="mapShowClosed"> 廃駅も表示</label>
+          <label class="check"><input type="checkbox" id="mapHideClosed" checked> 廃駅を非表示</label>
           <label class="check"><input type="checkbox" id="mapShowDone"> アクセス済みも表示</label>
         </div>
       </div>
@@ -128,7 +128,8 @@
           <button type="submit">この駅の近く</button>
         </form>
         <div id="nearStationChoices" class="chips"></div>
-        <p class="help">現在地は、近い駅を調べるためだけに使います。保存も送信もしません。廃駅は出しません。</p>
+        <p class="help">現在地は、近い駅を調べるためだけに使います。保存も送信もしません。</p>
+        <label class="check"><input type="checkbox" id="nearHideClosed"> 廃駅を非表示</label>
         <div class="chips" id="nearLimitChips" role="group" aria-label="表示する駅の数"></div>
         <p id="nearMessage" class="message" role="status"></p>
       </div>

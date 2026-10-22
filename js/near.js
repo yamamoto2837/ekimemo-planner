@@ -3,17 +3,22 @@
 //
 // 出先で「いまいる場所の近くに、まだ行っていない駅はあるか」を見る画面。
 // ・現在地（スマホの位置情報）か、駅名を基準にする
-// ・行ける未アクセス駅（廃駅を除く）を、直線距離の近い順に並べる
+// ・未アクセス駅（廃駅も含む。「廃駅を非表示」で外せる）を、直線距離の近い順に並べる
 // 位置情報はその場の計算に使うだけで、保存も送信もしない。
 // ============================================================
 
 const NEAR_LIMITS = [10, 30, 50];
 let nearLimit = 30;
 let nearBase = null;   // 基準の地点 { lat, lon, label, accuracy }
+let nearHideClosed = false;   // 廃駅を出さないか（最初は廃駅も出す）
 
 // ---------- 準備（app.js から呼ばれる） ----------
 
 function initNearScreen() {
+  const hideClosed = document.getElementById('nearHideClosed');
+  nearHideClosed = hideClosed.checked;
+  hideClosed.addEventListener('change', e => { nearHideClosed = e.target.checked; renderNear(); });
+
   document.getElementById('nearLocate').addEventListener('click', locateHere);
   document.getElementById('nearStationForm').addEventListener('submit', e => {
     e.preventDefault();
@@ -128,13 +133,14 @@ function formatDistance(m) {
   return `${Math.round(m / 1000)} km`;
 }
 
-// 基準の地点から近い、行ける未アクセス駅を集める。
+// 基準の地点から近い未アクセス駅を集める（「廃駅を非表示」なら廃駅を除く）。
 // 駅メモの駅に駅コードが複数あるとき（乗換駅など）は、一番近い駅コードの位置で測る。
 function nearestTodo(base, limit) {
   const accessed = appState.resolved.accessed;
   const list = [];
   for (const [u, unit] of Object.entries(MASTER.units)) {
-    if (unit.closed || accessed.has(u) || u === base.unitId) continue;
+    if (accessed.has(u) || u === base.unitId) continue;
+    if (unit.closed && nearHideClosed) continue;
     let best = null;
     for (const c of unit.codes) {
       const s = MASTER.stations[c];
@@ -176,17 +182,18 @@ function renderNear() {
   head.textContent = info;
 
   for (const p of nearestTodo(nearBase, nearLimit)) list.append(nearItem(p));
-  if (!list.children.length) list.append(el('li', 'muted', '行ける未アクセス駅はありません。'));
+  if (!list.children.length) list.append(el('li', 'muted', '未アクセスの駅はありません。'));
 }
 
 // 駅1つ分の行
 function nearItem(p) {
   const unit = MASTER.units[p.u];
-  const li = el('li', 'near-item');
+  const li = el('li', unit.closed ? 'near-item near-closed' : 'near-item');
 
   const head = el('div', 'near-head');
   const name = el('span', 'near-name', unit.name);
   name.append(el('small', 'muted', `（${prefName(unit.pref)}）`));
+  if (unit.closed) name.append(' ', el('span', 'tag', '廃駅'));
   const dist = el('span', 'near-dist', formatDistance(p.d));
   dist.append(el('small', '', ` ${directionName(nearBase.lat, nearBase.lon, p.lat, p.lon)}`));
   head.append(name, dist);

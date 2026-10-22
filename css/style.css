@@ -350,6 +350,8 @@ select {
 .near-lines { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .near-lines a { color: var(--accent); }
 .near-route { display: inline-block; margin-top: 4px; font-size: 13px; color: var(--accent); }
+.near-item.near-closed { border-left: 4px dashed var(--muted); }
+.near-closed .near-name { color: var(--muted); }
 
 /* スマホ幅では、県名と数字を2段に分ける */
 @media (max-width: 560px) {

@@ -40,8 +40,11 @@ function initMapScreen() {
     needFit = true;
     renderMap();
   });
-  document.getElementById('mapShowClosed').addEventListener('change', e => {
-    mapFilter.showClosed = e.target.checked;
+  // 「廃駅を非表示」にチェック → 廃駅は出さない
+  const hideClosed = document.getElementById('mapHideClosed');
+  mapFilter.showClosed = !hideClosed.checked;
+  hideClosed.addEventListener('change', e => {
+    mapFilter.showClosed = !e.target.checked;
     renderMap();
   });
   document.getElementById('mapShowDone').addEventListener('change', e => {
