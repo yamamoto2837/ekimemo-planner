@@ -9,7 +9,7 @@
 const collectFilter = {
   remain: 0,          // 0 = すべて、1〜3 = 残りがちょうどその駅数の路線だけ
   search: '',         // 路線名の一部
-  countClosed: true,  // 廃駅も残りに数えるか（画面の「廃駅を残りに数えない」の逆）
+  countClosed: true,  // 廃駅も残りに数えるか（画面の「廃駅を残りに数える」。最初はオン）
 };
 
 const REMAIN_CHOICES = [
@@ -35,11 +35,11 @@ function initCollectScreen() {
     collectFilter.search = e.target.value.trim();
     renderCollect();
   });
-  // 「廃駅を残りに数えない」にチェック → 廃駅は数えない
-  const excludeClosed = document.getElementById('excludeClosed');
-  collectFilter.countClosed = !excludeClosed.checked;
-  excludeClosed.addEventListener('change', e => {
-    collectFilter.countClosed = !e.target.checked;
+  // 「廃駅を残りに数える」のチェック（最初はオン）。外すと廃駅は数えない
+  const countClosed = document.getElementById('countClosed');
+  countClosed.checked = collectFilter.countClosed;
+  countClosed.addEventListener('change', e => {
+    collectFilter.countClosed = e.target.checked;
     renderCollect();
   });
 }

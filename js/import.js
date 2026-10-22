@@ -40,7 +40,7 @@ function renderSavedStatus() {
   cards.append(
     card(formatRate(r.accessed.size, r.totalStations), '達成率', true),
     card(r.accessed.size, 'アクセス済みの駅'),
-    card(r.remaining, '残りの駅'),
+    card(r.remaining, '残りの駅（廃駅を含む）'),
     card(r.totalStations, '全駅'),
   );
   box.append(cards);
@@ -71,7 +71,7 @@ function renderResult(r) {
   document.getElementById('resultCards').replaceChildren(
     card(formatRate(r.accessed.size, r.totalStations), '達成率', true),
     card(r.accessed.size, 'アクセス済みの駅'),
-    card(r.remaining, '残りの駅'),
+    card(r.remaining, '残りの駅（廃駅を含む）'),
     card(r.idCount, '読み込んだID'),
     card(r.unknownIds.length, 'マスタに無いID'),
   );
