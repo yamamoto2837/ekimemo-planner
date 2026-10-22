@@ -21,6 +21,7 @@
     <a href="#collect" data-screen="collect">取りこぼし回収</a>
     <a href="#line" data-screen="line">路線詳細</a>
     <a href="#route" data-screen="route">巡回ルート</a>
+    <a href="#plans" data-screen="plans">遠征プラン</a>
     <a href="#import" data-screen="import">データ取り込み</a>
   </nav>
 </header>
@@ -172,6 +173,13 @@
     </div>
   </section>
 
+  <!-- ===== 遠征プラン（F8） ===== -->
+  <section id="plans" class="screen" hidden>
+    <h2>遠征プラン</h2>
+    <p class="help">巡回ルートで保存したプランです。押すと中身が開きます。各駅の「✓」は、いまアクセス済みの駅です。</p>
+    <div id="planList"></div>
+  </section>
+
   <!-- ===== データ取り込み画面（F1） ===== -->
   <section id="import" class="screen" hidden>
     <h2>データ取り込み</h2>
@@ -280,5 +288,6 @@
 <script src="js/sync.js"></script>
 <script src="js/routeplan.js"></script>
 <script src="js/route.js"></script>
+<script src="js/plans.js"></script>
 </body>
 </html>

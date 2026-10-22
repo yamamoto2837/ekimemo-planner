@@ -13,7 +13,7 @@ const appState = {
   resolved: null,   // 進捗を駅マスタに当てはめた結果（resolveProgress の戻り値）
 };
 
-const SCREENS = ['collect', 'line', 'pref', 'map', 'near', 'route', 'import'];
+const SCREENS = ['collect', 'line', 'pref', 'map', 'near', 'route', 'plans', 'import'];
 
 // 路線ごとの集計（progress.js の computeLineStats）。進捗が変わったときだけ作り直す。
 let lineStatsCache = null;
@@ -64,6 +64,7 @@ function setProgress(progress) {
   renderMap();           // map.js
   renderNear();          // near.js
   renderRoute();         // route.js
+  renderPlans();         // plans.js（「アクセス済み」の印を最新にする）
 }
 
 // 画面の切り替え
@@ -84,6 +85,12 @@ function showScreen(name) {
 //     #map/pref/13（地図で東京都）、#map/line/11101（地図でその路線）
 function showScreenFromHash() {
   const [name, ...rest] = location.hash.replace('#', '').split('/');
+  if (name === 'plans') {
+    selectPlan(rest.length > 0 ? decodeURIComponent(rest[0]) : null);   // #plans/プランの番号 なら、そのプランを開く
+    showScreen(name);
+    window.scrollTo(0, 0);
+    return;
+  }
   if (name === 'route') {
     showScreen(name);
     onRouteShown();   // 地図があれば、表示されてから大きさを測り直す
@@ -126,9 +133,11 @@ async function startApp() {
   initNearScreen();      // near.js
   initSyncScreen();      // sync.js（共有の設定を読む）
   initRouteScreen();     // route.js
+  initPlansScreen();     // plans.js
 
   // メモは進捗が無くても使えるので、先に読み込む（memo.js）
   await loadMemos();
+  await loadPlans();     // plans.js（遠征プラン）
   renderMemoList();
 
   let progress = null;

@@ -393,6 +393,25 @@ select {
   box-shadow: 0 0 2px rgba(0, 0, 0, .5);
 }
 
+/* ---------- 遠征プラン ---------- */
+.plan-save input[type="text"] { flex: 2 1 180px; min-width: 0; }
+.plan-save input[type="date"], .plan-save input[type="text"] {
+  font: inherit; font-size: 15px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+}
+.plan-section { margin: 16px 0 8px; }
+.plan-card { padding: 0; }
+.plan-card > *:not(summary) { margin-left: 16px; margin-right: 16px; }
+.plan-card > :last-child { margin-bottom: 16px; }
+.plan-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 16px; cursor: pointer; }
+.plan-date { font-weight: bold; color: var(--accent); }
+.plan-name { font-weight: bold; font-size: 16px; overflow-wrap: anywhere; }
+.plan-nums { font-size: 12px; color: var(--muted); }
+.plan-result { background: var(--code-bg); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 8px; font-size: 14px; }
+.plan-stops { margin-top: 12px; }
+.plan-done { opacity: 0.6; }
+.plan-check { font-size: 12px; color: var(--good); font-weight: bold; white-space: nowrap; }
+
 /* ---------- デバイス間の共有 ---------- */
 .sync-form { display: flex; flex-direction: column; gap: 8px; }
 .sync-form .select-label { flex: none; }   /* 縦に並べるので、地図用の「幅を広げる」指定を外す */

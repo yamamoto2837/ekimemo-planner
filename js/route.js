@@ -155,6 +155,43 @@ function renderRouteResult(plan, startUnit, targetSet) {
   }
   box.append(head);
 
+  // プランとして保存（plans.js）
+  const save = el('div', 'panel plan-save');
+  save.append(el('h4', '', 'プランとして保存'));
+  const row = el('div', 'filter-row');
+  const nameInput = el('input');
+  nameInput.type = 'text';
+  nameInput.maxLength = 60;
+  nameInput.value = [...routeSettings.prefs].sort((a, b) => a - b).map(prefName).join('・') + ' 遠征';
+  nameInput.setAttribute('aria-label', 'プランの名前');
+  const dateInput = el('input');
+  dateInput.type = 'date';
+  dateInput.value = todayText();
+  dateInput.setAttribute('aria-label', '遠征の日付');
+  const saveBtn = el('button', 'primary', '保存する');
+  saveBtn.type = 'button';
+  const saveMsg = el('p', 'message');
+  saveBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim() || '遠征';
+    if (!dateInput.value) { saveMsg.textContent = '日付を入れてください。'; saveMsg.className = 'message error'; return; }
+    saveBtn.disabled = true;
+    try {
+      const id = await addPlanFromRoute(name, dateInput.value, plan, startUnit, routeSettings.round, targetSet);
+      saveMsg.replaceChildren(document.createTextNode('保存しました。'));
+      const a = el('a', '', '遠征プランを見る');
+      a.href = '#plans/' + encodeURIComponent(id);
+      saveMsg.append(' ', a);
+      saveMsg.className = 'message good';
+    } catch (e) {
+      saveMsg.textContent = '保存できませんでした: ' + e.message;
+      saveMsg.className = 'message error';
+      saveBtn.disabled = false;
+    }
+  });
+  row.append(nameInput, dateInput, saveBtn);
+  save.append(row, saveMsg);
+  box.append(save);
+
   // 地図
   const mapPanel = el('div', 'panel');
   const mapDiv = el('div', 'route-map');

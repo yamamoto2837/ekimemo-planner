@@ -1,7 +1,7 @@
 // ============================================================
 // デバイス間の共有（GitHub の非公開リポジトリ）
 //
-// 進捗とメモを1つのファイル（ekimemo-sync.json）にまとめて、
+// 進捗とメモ・遠征プランを1つのファイル（ekimemo-sync.json）にまとめて、
 // 非公開リポジトリに置く。各デバイスは次のときに、このファイルと中身をそろえる。
 //   ・アプリを開いたとき、アプリに戻ってきたとき
 //   ・進捗やメモを保存したとき（少し待ってから）
@@ -178,11 +178,11 @@ function stableText(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
 function sameSyncContent(a, b) {
-  return stableText({ p: a.progress || null, m: a.memos }) === stableText({ p: b.progress || null, m: b.memos });
+  return stableText({ p: a.progress || null, m: a.memos, n: a.plans || null }) === stableText({ p: b.progress || null, m: b.memos, n: b.plans || null });
 }
 
 // まとめた結果を、このデバイスに反映する
-async function applyMergedSync(progress, memos) {
+async function applyMergedSync(progress, memos, plans) {
   if (stableText(progress || null) !== stableText(appState.progress || null)) {
     await saveProgress(progress);
     setProgress(progress);   // app.js：画面を描き直す
@@ -192,6 +192,9 @@ async function applyMergedSync(progress, memos) {
     // メモを書いている途中なら、書き込み欄を壊さないよう描き直さない
     const editing = document.activeElement && document.activeElement.classList.contains('memo-text');
     if (!editing) renderLineDetail();
+  }
+  if (stableText(plans) !== stableText(getPlanData())) {
+    await replacePlanData(plans);   // plans.js
   }
 }
 
@@ -212,9 +215,10 @@ function syncNow() {
         const remote = await fetchRemoteSync();
         const memos = mergeMemoData(getMemoData(), remote.data && remote.data.memos);
         const progress = mergeProgressData(appState.progress, remote.data && remote.data.progress);
-        await applyMergedSync(progress, memos);
+        const plans = mergePlanData(getPlanData(), remote.data && remote.data.plans);   // plans.js：遠征プラン
+        await applyMergedSync(progress, memos, plans);
 
-        const payload = { version: 1, updatedAt: new Date().toISOString(), progress, memos };
+        const payload = { version: 1, updatedAt: new Date().toISOString(), progress, memos, plans };
         if (remote.data && sameSyncContent(remote.data, payload)) break;   // 送る必要なし
         if (await pushRemoteSync(payload, remote.sha)) break;
         if (attempt >= SYNC_RETRY) {
