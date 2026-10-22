@@ -19,6 +19,7 @@
     <a href="#line" data-screen="line">路線詳細</a>
     <a href="#pref" data-screen="pref">地域別</a>
     <a href="#map" data-screen="map">地図</a>
+    <a href="#near" data-screen="near">近くの駅</a>
     <a href="#import" data-screen="import">データ取り込み</a>
   </nav>
 </header>
@@ -109,6 +110,33 @@
     </div>
   </section>
 
+  <!-- ===== 現在地から近い未アクセス駅（F6） ===== -->
+  <section id="near" class="screen" hidden>
+    <h2>近くの未アクセス駅</h2>
+
+    <div id="nearEmpty" class="panel" hidden>
+      <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
+    </div>
+
+    <div id="nearBody" hidden>
+      <div class="panel filters">
+        <div class="buttons near-buttons">
+          <button type="button" id="nearLocate" class="primary">現在地から探す</button>
+        </div>
+        <form id="nearStationForm" class="filter-row">
+          <input type="search" id="nearStationName" placeholder="駅名から探す（例: 富山）" aria-label="駅名">
+          <button type="submit">この駅の近く</button>
+        </form>
+        <div id="nearStationChoices" class="chips"></div>
+        <p class="help">現在地は、近い駅を調べるためだけに使います。保存も送信もしません。廃駅は出しません。</p>
+        <div class="chips" id="nearLimitChips" role="group" aria-label="表示する駅の数"></div>
+        <p id="nearMessage" class="message" role="status"></p>
+      </div>
+      <p id="nearBaseInfo" class="muted"></p>
+      <ol id="nearList" class="near-list"></ol>
+    </div>
+  </section>
+
   <!-- ===== データ取り込み画面（F1） ===== -->
   <section id="import" class="screen" hidden>
     <h2>データ取り込み</h2>
@@ -174,5 +202,6 @@
 <script src="js/linedetail.js"></script>
 <script src="js/region.js"></script>
 <script src="js/map.js"></script>
+<script src="js/near.js"></script>
 </body>
 </html>

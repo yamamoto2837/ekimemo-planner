@@ -13,7 +13,7 @@ const appState = {
   resolved: null,   // 進捗を駅マスタに当てはめた結果（resolveProgress の戻り値）
 };
 
-const SCREENS = ['collect', 'line', 'pref', 'map', 'import'];
+const SCREENS = ['collect', 'line', 'pref', 'map', 'near', 'import'];
 
 // 路線ごとの集計（progress.js の computeLineStats）。進捗が変わったときだけ作り直す。
 let lineStatsCache = null;
@@ -62,6 +62,7 @@ function setProgress(progress) {
   renderRegion();        // region.js
   fillMapLineOptions();  // map.js（路線の選択肢の「残り○駅」を更新）
   renderMap();           // map.js
+  renderNear();          // near.js
 }
 
 // 画面の切り替え
@@ -112,6 +113,7 @@ async function startApp() {
   initLineScreen();      // linedetail.js
   initRegionScreen();    // region.js
   initMapScreen();       // map.js
+  initNearScreen();      // near.js
 
   let progress = null;
   try {
