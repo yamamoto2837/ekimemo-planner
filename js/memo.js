@@ -20,6 +20,7 @@ const MEMO_SAVE_DELAY = 500;     // 打ち終わってから保存するまで�
 let memoData = emptyMemoData();
 let memoSaveTimer = null;
 let memoSaveCallbacks = [];      // 保存が終わったら知らせる先
+let memoChanged = false;         // 前に保存してから書き換わったか（共有で送るかどうかに使う）
 
 function emptyMemoData() {
   return { version: 1, updatedAt: null, lines: {}, stations: {} };
@@ -60,9 +61,13 @@ function setMemo(kind, key, text, name, done) {
     scheduleMemoSave();
     return;
   }
-  const now = new Date().toISOString();
+  // 日時は「今」。ただし、デバイスの時計がずれていても書き直しが負けないよう、
+  // それまでのメモの日時より必ず新しくする
+  const oldTime = old ? Date.parse(old.updatedAt) || 0 : 0;
+  const now = new Date(Math.max(Date.now(), oldTime + 1)).toISOString();
   store[key] = { text, name, updatedAt: now };
-  memoData.updatedAt = now;
+  if (!memoData.updatedAt || now > memoData.updatedAt) memoData.updatedAt = now;
+  memoChanged = true;
   scheduleMemoSave();
 }
 
@@ -77,6 +82,8 @@ async function flushMemoSave() {
   memoSaveTimer = null;
   const callbacks = memoSaveCallbacks;
   memoSaveCallbacks = [];
+  const changed = memoChanged;
+  memoChanged = false;
   let ok = true;
   try {
     await saveValue(MEMO_KEY, memoData);
@@ -86,6 +93,21 @@ async function flushMemoSave() {
   }
   callbacks.forEach(cb => cb(ok));
   if (typeof renderMemoList === 'function') renderMemoList();   // linedetail.js の一覧
+  if (!ok) memoChanged = memoChanged || changed;   // 保存できなかったら、次にもう一度
+  if (ok && changed && typeof scheduleSync === 'function') scheduleSync();   // sync.js：ほかのデバイスへ
+}
+
+// ---------- 共有（sync.js）から使う ----------
+
+function getMemoData() {
+  return memoData;
+}
+
+// ほかのデバイスとまとめた中身に入れ替えて保存する
+async function replaceMemoData(data) {
+  memoData = data;
+  await saveValue(MEMO_KEY, memoData);
+  renderMemoList();
 }
 
 // 画面を閉じたり、ほかのアプリに切り替えたりするときは、待たずに保存する

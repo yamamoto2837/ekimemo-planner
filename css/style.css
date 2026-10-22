@@ -353,6 +353,20 @@ select {
 .near-item.near-closed { border-left: 4px dashed var(--muted); }
 .near-closed .near-name { color: var(--muted); }
 
+/* ---------- デバイス間の共有 ---------- */
+.sync-form { display: flex; flex-direction: column; gap: 8px; }
+.sync-form .select-label { flex: none; }   /* 縦に並べるので、地図用の「幅を広げる」指定を外す */
+.sync-form input {
+  font: inherit;
+  font-size: 15px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
 /* ---------- メモ ---------- */
 .memo-editor { margin: 8px 0 0; }
 .memo-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; font-size: 13px; font-weight: bold; }

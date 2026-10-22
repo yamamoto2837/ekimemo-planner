@@ -118,6 +118,7 @@ async function startApp() {
   initRegionScreen();    // region.js
   initMapScreen();       // map.js
   initNearScreen();      // near.js
+  initSyncScreen();      // sync.js（共有の設定を読む）
 
   // メモは進捗が無くても使えるので、先に読み込む（memo.js）
   await loadMemos();
@@ -134,6 +135,9 @@ async function startApp() {
 
   window.addEventListener('hashchange', showScreenFromHash);
   showScreenFromHash();
+
+  // 共有しているなら、ほかのデバイスで書いた進捗・メモを読み込む（待たずに画面は先に出す）
+  syncNow();
 }
 
 // ほかの js ファイルを全部読み込んでから始める

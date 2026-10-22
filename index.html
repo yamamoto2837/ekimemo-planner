@@ -183,6 +183,43 @@
       </div>
       <p id="saveMessage" class="message" role="status"></p>
     </div>
+
+    <!-- デバイス間の共有（GitHub の非公開リポジトリ） -->
+    <div class="panel" id="syncPanel">
+      <h3>デバイス間の共有</h3>
+      <p class="help">
+        GitHub の非公開リポジトリを使って、取り込んだ進捗とメモを、スマホやPCのあいだでそろえます。
+        使うデバイスごとに、1回だけ接続してください。
+      </p>
+      <p id="syncStatus" class="muted" role="status"></p>
+
+      <!-- まだ接続していないとき -->
+      <div id="syncSetup" class="sync-form">
+        <label class="select-label">リポジトリ（ユーザー名/リポジトリ名）
+          <input type="text" id="syncRepo" placeholder="例: yourname/ekimemo-data" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <label class="select-label">アクセス用の鍵（トークン）
+          <input type="password" id="syncToken" placeholder="github_pat_ で始まる文字" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <p class="help">
+          鍵は、このデバイスのブラウザの中にだけ保存されます。ほかの人に教えたり、チャットやメールに貼ったりしないでください。
+          公開されているリポジトリには接続しません。
+        </p>
+        <div class="buttons">
+          <button type="button" id="syncConnect" class="primary">接続する</button>
+        </div>
+      </div>
+
+      <!-- 接続しているとき -->
+      <div id="syncConnected" hidden>
+        <p>接続先: <b id="syncRepoName"></b></p>
+        <div class="buttons">
+          <button type="button" id="syncNowButton" class="primary">今すぐそろえる</button>
+          <button type="button" id="syncDisconnect">このデバイスの接続をやめる</button>
+        </div>
+      </div>
+      <p id="syncMessage" class="message" role="status"></p>
+    </div>
   </section>
 
 </main>
@@ -190,6 +227,7 @@
 <footer class="app-footer">
   <p>駅データ：<a href="https://ekidata.jp/" target="_blank" rel="noopener">駅データ.jp</a> を加工して使用</p>
   <p id="masterInfo" class="muted"></p>
+  <p id="syncFooter" class="muted"></p>
 </footer>
 
 <!-- 地図の部品（Leaflet）。読み込めなくても、地図以外の画面は使える -->
@@ -209,5 +247,6 @@
 <script src="js/region.js"></script>
 <script src="js/map.js"></script>
 <script src="js/near.js"></script>
+<script src="js/sync.js"></script>
 </body>
 </html>

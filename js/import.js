@@ -140,6 +140,7 @@ async function savePending() {
     await saveProgress(progress);
     pendingIds = null;
     setProgress(progress);   // app.js：ほかの画面も描き直す
+    syncNow();               // sync.js：共有しているなら、ほかのデバイスへ
     saveMessage.replaceChildren(document.createTextNode('保存しました。'));
     const link = el('a', '', '取りこぼし回収リストを見る');
     link.href = '#collect';
