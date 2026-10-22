@@ -46,7 +46,7 @@
         <div class="chips" id="remainChips" role="group" aria-label="残りの駅数で絞り込み"></div>
         <div class="filter-row">
           <input type="search" id="lineSearch" placeholder="路線名で絞り込み（例: 京急）">
-          <label class="check"><input type="checkbox" id="excludeClosed" checked> 廃駅を残りに数えない</label>
+          <label class="check"><input type="checkbox" id="excludeClosed"> 廃駅を残りに数えない</label>
         </div>
       </div>
       <p id="collectCount" class="muted"></p>
@@ -81,7 +81,7 @@
     <div id="prefBody" hidden>
       <div class="cards region-cards" id="regionCards"></div>
       <div class="chips pref-sort" id="prefSortChips" role="group" aria-label="並べ替え"></div>
-      <p class="help">達成率は廃駅も含めた全駅で計算しています。「残り」は行ける駅（廃駅を除く）の数です。</p>
+      <p class="help">達成率は廃駅も含めた全駅で計算しています。「残り」も廃駅を含めた数です（駅メモでは廃駅も、近くに行けば取れます）。</p>
       <ol id="prefList" class="pref-list"></ol>
     </div>
   </section>
@@ -105,7 +105,7 @@
           </label>
         </div>
         <div class="filter-row">
-          <label class="check"><input type="checkbox" id="mapHideClosed" checked> 廃駅を非表示</label>
+          <label class="check"><input type="checkbox" id="mapHideClosed"> 廃駅を非表示</label>
           <label class="check"><input type="checkbox" id="mapShowDone"> アクセス済みも表示</label>
         </div>
       </div>
@@ -184,7 +184,7 @@
   <!-- ===== 巡回ルート（F7） ===== -->
   <section id="route" class="screen" hidden>
     <h2>巡回ルート</h2>
-    <p class="help">選んだ都道府県の未アクセス駅（行ける駅）を、線路に沿って回る順番を考えます。乗り換え時間や運行本数は考えません。</p>
+    <p class="help">選んだ都道府県の未アクセス駅を、線路に沿って回る順番を考えます。乗り換え時間や運行本数は考えません。</p>
 
     <div id="routeEmpty" class="panel" hidden>
       <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
@@ -201,6 +201,7 @@
           <input type="search" id="routeStart" placeholder="出発する駅（空なら自動で決めます）" aria-label="出発する駅">
         </form>
         <label class="check"><input type="checkbox" id="routeRound"> 出発駅に戻ってくる</label>
+        <label class="check"><input type="checkbox" id="routeClosed" checked> 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れます）</label>
         <div class="buttons">
           <button type="button" id="routeRun" class="primary">順番を考える</button>
         </div>

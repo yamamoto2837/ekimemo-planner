@@ -99,7 +99,9 @@ function computeLineStats(master, accessed) {
       if (accessed.has(u)) continue;
       (closed ? remainingClosed : remainingActive).push(u);
     }
-    result.push({ cd, name: line.name, closedLine: line.closed, stations, activeTotal, remainingActive, remainingClosed });
+    // remaining … 廃駅も含めた残り（路線の並び順）。駅メモでは廃駅も近くに行けば取れるので、基本はこちらを使う
+    const remaining = stations.filter(u => !accessed.has(u));
+    result.push({ cd, name: line.name, closedLine: line.closed, stations, activeTotal, remaining, remainingActive, remainingClosed });
   }
   return result;
 }
@@ -111,14 +113,18 @@ function computeLineStats(master, accessed) {
 function computePrefStats(master, accessed) {
   const result = [];
   for (let p = 0; p <= 47; p++) {
-    result.push({ pref: p, total: 0, done: 0, remainingActive: [], remainingClosed: [] });
+    // remaining … 廃駅も含めた残り
+    result.push({ pref: p, total: 0, done: 0, remaining: [], remainingActive: [], remainingClosed: [] });
   }
   for (const [u, unit] of Object.entries(master.units)) {
     const s = result[unit.pref];
     if (!s) continue;
     s.total++;
     if (accessed.has(u)) s.done++;
-    else (unit.closed ? s.remainingClosed : s.remainingActive).push(u);
+    else {
+      s.remaining.push(u);
+      (unit.closed ? s.remainingClosed : s.remainingActive).push(u);
+    }
   }
   return result;
 }

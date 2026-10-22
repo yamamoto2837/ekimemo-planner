@@ -78,7 +78,7 @@ function todayText() {
 // 巡回ルートの結果（routeplan.js の planRoute の戻り値）から、プランを作って保存する
 // targets … 回る対象の未アクセス駅（出発駅がもともとアクセス済みなら入らない）
 async function addPlanFromRoute(name, date, route, startUnit, round, targets) {
-  const lineLabel = lc => lc === 'transfer' ? '乗り換え' : lc === 'guess' ? '線路データ無し（推定）' : (MASTER.lines[lc] ? MASTER.lines[lc].name : lc);
+  const lineLabel = lc => lc === 'transfer' ? '乗り換え' : lc === 'guess' ? '線路データ無し（推定）' : String(lc).startsWith('closed:') ? lineName(lc) : (MASTER.lines[lc] ? MASTER.lines[lc].name : lc);
   const plan = {
     id: newPlanId(),
     name,

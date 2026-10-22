@@ -9,7 +9,7 @@
 const mapFilter = {
   pref: 0,          // 0 = すべての都道府県
   line: '',         // '' = すべての路線
-  showClosed: false,
+  showClosed: true,   // 廃駅も表示する（駅メモでは廃駅も近くに行けば取れる）
   showDone: false,
 };
 
@@ -73,7 +73,7 @@ function fillMapLineOptions() {
   const select = document.getElementById('mapLine');
   const stats = getLineStats();
   const remainOf = {};
-  if (stats) for (const s of stats) remainOf[s.cd] = s.remainingActive.length;
+  if (stats) for (const s of stats) remainOf[s.cd] = s.remaining.length;   // 廃駅も含めた残り
 
   const lines = Object.entries(MASTER.lines).filter(([, l]) =>
     mapFilter.pref === 0 || l.stations.some(sc => MASTER.stations[sc].pref === mapFilter.pref));

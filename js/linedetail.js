@@ -26,7 +26,7 @@ function renderLineFind() {
 
   const stats = getLineStats();
   const remainOf = {};
-  if (stats) for (const s of stats) remainOf[s.cd] = s.remainingActive.length;
+  if (stats) for (const s of stats) remainOf[s.cd] = s.remaining.length;   // 廃駅も含めた残り
 
   const hits = Object.entries(MASTER.lines)
     .filter(([, l]) => l.name.includes(word))
@@ -63,14 +63,14 @@ function lineRows(line, accessed) {
   return rows;
 }
 
-// 未アクセス（行ける駅）の区間をまとめる。
-// アクセス済みの駅で区切る。行けない廃駅は区切りにも数にも入れない。
+// 未アクセスの区間をまとめる（駅メモでは廃駅も近くに行けば取れるので、廃駅も含める）。
+// アクセス済みの駅で区切る。
 function todoSegments(rows) {
   const segments = [];
   let cur = null;
   let seenDoneBefore = false;
   for (const r of rows) {
-    if (r.status === 'todo') {
+    if (r.status === 'todo' || r.status === 'closed') {
       if (!cur) cur = { first: r, last: r, count: 0, atStart: !seenDoneBefore, atEnd: false };
       cur.last = r;
       cur.count++;
@@ -123,9 +123,10 @@ function renderLineDetail(cd) {
 
   const accessed = appState.resolved ? appState.resolved.accessed : new Set();
   const rows = lineRows(line, accessed);
-  const active = rows.filter(r => r.status !== 'closed' && !r.unit.closed);
-  const done = active.filter(r => r.status === 'done').length;
-  const todo = rows.filter(r => r.status === 'todo').length;
+  // 廃駅も含めて数える（駅メモの路線コンプも廃駅を含む）
+  const done = rows.filter(r => r.status === 'done').length;
+  const todo = rows.length - done;
+  const todoClosed = rows.filter(r => r.status === 'closed').length;
 
   // --- 見出しと数字 ---
   const head = el('div', 'panel');
@@ -137,19 +138,15 @@ function renderLineDetail(cd) {
     head.append(el('p', 'notice', '進捗が取り込まれていないので、全駅を未アクセスとして表示しています。'));
   }
   let countText;
-  if (active.length === 0) {
-    // 全駅が廃駅の路線（もう行けないので、アクセス済みの数だけ出す）
-    const closedDone = rows.filter(r => r.status === 'done').length;
-    countText = `全駅が廃駅です（${rows.length} 駅中 ${closedDone} 駅アクセス済み）`;
-  } else if (todo === 0) {
-    countText = `コンプ済み（全 ${active.length} 駅）`;
+  if (todo === 0) {
+    countText = `コンプ済み（全 ${rows.length} 駅）`;
   } else {
-    countText = `残り ${todo} 駅 ／ 全 ${active.length} 駅中 ${done} 駅アクセス済み（${formatRate(done, active.length)}）`;
+    countText = `残り ${todo} 駅${todoClosed ? `（うち廃駅 ${todoClosed}）` : ''} ／ 全 ${rows.length} 駅中 ${done} 駅アクセス済み（${formatRate(done, rows.length)}）`;
   }
   head.append(el('p', 'detail-count', countText));
   const bar = el('div', 'bar');
   const fill = el('div', 'bar-fill');
-  fill.style.width = (active.length ? done / active.length * 100 : 0) + '%';
+  fill.style.width = (rows.length ? done / rows.length * 100 : 0) + '%';
   bar.append(fill);
   head.append(bar);
 

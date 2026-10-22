@@ -57,10 +57,25 @@ function routeGraph() {
     const arr = [...set];
     for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) add(arr[i], arr[j], ROUTE_TRANSFER_KM, 'transfer');
   }
-  // 線路のデータが無い行ける駅は、近い駅に推定でつなぐ
+  // 廃駅には接続駅データが無いので、路線の駅の並び順どおりに、となりの駅と直線でつなぐ
+  // （駅メモでは廃駅も、近くに行けば取れる）。路線は「closed:路線コード」として区別する
+  for (const [lc, line] of Object.entries(MASTER.lines)) {
+    const order = [];
+    for (const sc of line.stations) {
+      const u = MASTER.stations[sc].u;
+      if (order[order.length - 1] !== u) order.push(u);
+    }
+    for (let i = 0; i + 1 < order.length; i++) {
+      const a = order[i], b = order[i + 1];
+      if (!MASTER.units[a].closed && !MASTER.units[b].closed) continue;   // 現役どうしは接続駅データでつながっている
+      if (adj.has(a) && adj.get(a).has(b)) continue;
+      add(a, b, routeDistKm(MASTER.units[a], MASTER.units[b]) * ROUTE_GUESS_RATE, 'closed:' + lc);
+    }
+  }
+  // それでも線路のデータが無い駅（新幹線だけの駅など）は、近い駅に推定でつなぐ
   const linked = [...adj.keys()];
   for (const [u, unit] of Object.entries(MASTER.units)) {
-    if (unit.closed || adj.has(u)) continue;
+    if (adj.has(u)) continue;
     const near = linked.map(v => ({ v, d: routeDistKm(unit, MASTER.units[v]) }))
       .sort((a, b) => a.d - b.d).slice(0, ROUTE_GUESS_LINKS);
     for (const n of near) add(u, n.v, n.d * ROUTE_GUESS_RATE, 'guess');
@@ -240,7 +255,7 @@ function planRoute(targets, startUnit, round) {
     // 同じ路線が続くところは1つにまとめる
     const rides = [];
     for (const e of edges) {
-      if (e.line === 'guess') { guessed.add(g.ids[e.node]); guessed.add(g.ids[e.prev]); }
+      if (e.line === 'guess' || String(e.line).startsWith('closed:')) { guessed.add(g.ids[e.node]); guessed.add(g.ids[e.prev]); }
       const last = rides[rides.length - 1];
       if (last && last.line === e.line) { last.to = g.ids[e.node]; last.km += e.w; last.path.push(g.ids[e.node]); }
       else rides.push({ line: e.line, from: g.ids[e.prev], to: g.ids[e.node], km: e.w, path: [g.ids[e.prev], g.ids[e.node]] });

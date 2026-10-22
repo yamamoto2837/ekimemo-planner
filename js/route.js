@@ -1,7 +1,7 @@
 // ============================================================
 // 巡回ルート（F7 の画面）
 //
-// 都道府県を選ぶと、その中の行ける未アクセス駅を、線路に沿って回る順番を出す。
+// 都道府県を選ぶと、その中の未アクセス駅（廃駅も含められる）を、線路に沿って回る順番を出す。
 // 計算は routeplan.js。
 // ============================================================
 
@@ -10,6 +10,7 @@ const ROUTE_MAX_TARGETS = 300;   // 一度に回る駅の上限（多いと計�
 const routeSettings = {
   prefs: new Set(),   // 選んだ都道府県
   round: false,       // 出発駅に戻ってくるか
+  withClosed: true,   // 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れる）
 };
 let routeLeafletMap = null;
 let routeLayerGroup = null;
@@ -19,16 +20,19 @@ let routeLayerGroup = null;
 function initRouteScreen() {
   document.getElementById('routeRun').addEventListener('click', runRoute);
   document.getElementById('routeRound').addEventListener('change', e => { routeSettings.round = e.target.checked; });
+  const closedBox = document.getElementById('routeClosed');
+  closedBox.checked = routeSettings.withClosed;
+  closedBox.addEventListener('change', e => { routeSettings.withClosed = e.target.checked; renderRoutePrefs(); });
   document.getElementById('routeStartForm').addEventListener('submit', e => { e.preventDefault(); runRoute(); });
   document.getElementById('routeClearPrefs').addEventListener('click', () => { routeSettings.prefs.clear(); renderRoutePrefs(); });
 }
 
-// 選んだ都道府県の、行ける未アクセス駅
+// 選んだ都道府県の未アクセス駅（「廃駅も対象にする」なら廃駅も）
 function routeTargets() {
   const stats = getPrefStats();
   if (!stats) return [];
   const list = [];
-  for (const p of routeSettings.prefs) list.push(...stats[p].remainingActive);
+  for (const p of routeSettings.prefs) list.push(...(routeSettings.withClosed ? stats[p].remaining : stats[p].remainingActive));
   return list;
 }
 
@@ -51,7 +55,7 @@ function renderRoutePrefs() {
     const row = el('div', 'route-region');
     row.append(el('span', 'route-region-name', r.name));
     for (let p = r.from; p <= r.to; p++) {
-      const n = stats[p].remainingActive.length;
+      const n = (routeSettings.withClosed ? stats[p].remaining : stats[p].remainingActive).length;
       const label = el('label', 'route-pref' + (n === 0 ? ' muted' : ''));
       const cb = el('input');
       cb.type = 'checkbox';
@@ -91,8 +95,8 @@ function updateRouteCount() {
 // 駅名から出発駅を決める（同じ名前が複数あれば、選んだ都道府県の駅を優先）
 function findRouteStart(name) {
   if (!name) return { unit: null };
-  const hits = Object.entries(MASTER.units).filter(([, u]) => u.name === name && !u.closed);
-  if (hits.length === 0) return { error: `「${name}」という行ける駅が見つかりません（「駅」は付けずに入力します）。` };
+  const hits = Object.entries(MASTER.units).filter(([, u]) => u.name === name);
+  if (hits.length === 0) return { error: `「${name}」という駅が見つかりません（「駅」は付けずに入力します）。` };
   const inPrefs = hits.filter(([, u]) => routeSettings.prefs.has(u.pref));
   const [id] = (inPrefs.length ? inPrefs : hits)[0];
   return { unit: id, note: hits.length > 1 ? `「${name}」は ${hits.length} 駅あるので、${prefName(MASTER.units[id].pref)}の駅を使いました。` : '' };
@@ -133,6 +137,10 @@ function runRoute() {
 function lineName(lc) {
   if (lc === 'transfer') return '乗り換え';
   if (lc === 'guess') return '線路データ無し（推定）';
+  if (String(lc).startsWith('closed:')) {
+    const real = lc.slice(7);
+    return (MASTER.lines[real] ? MASTER.lines[real].name : real) + '（廃止区間・直線で推定）';
+  }
   return MASTER.lines[lc] ? MASTER.lines[lc].name : lc;
 }
 
@@ -148,7 +156,7 @@ function renderRouteResult(plan, startUnit, targetSet) {
   head.append(el('p', 'detail-count', `線路に沿った距離 約 ${Math.round(plan.totalKm)} km`));
   head.append(el('p', 'help', '乗り換え時間や運行本数は考えていません。机の上で計画を立てるための目安です。'));
   if (plan.guessed.length > 0) {
-    head.append(el('p', 'notice', `線路のデータが無い駅（新幹線だけの駅など）を含むため、${plan.guessed.length} 駅の前後は、近くの駅から直線で推定しています。`));
+    head.append(el('p', 'notice', `線路のデータが無い駅（新幹線だけの駅や廃駅など）を含むため、${plan.guessed.length} 駅の前後は、近くの駅から直線で推定しています。`));
   }
   if (plan.unreachable.length > 0) {
     head.append(el('p', 'notice', `線路でつながっていないため、次の駅は順番に入れていません: ${plan.unreachable.map(u => MASTER.units[u] ? MASTER.units[u].name : u).join('、')}`));
@@ -222,7 +230,7 @@ function renderRouteResult(plan, startUnit, targetSet) {
         const t = r.line === 'transfer'
           ? `乗り換え（${MASTER.units[r.from].name}→${MASTER.units[r.to].name}）`
           : `${lineName(r.line)}：${MASTER.units[r.from].name}→${MASTER.units[r.to].name}`;
-        rides.append(el('div', r.line === 'guess' ? 'route-ride guess' : 'route-ride', t));
+        rides.append(el('div', (r.line === 'guess' || String(r.line).startsWith('closed:')) ? 'route-ride guess' : 'route-ride', t));
       }
       li.append(rides);
     }

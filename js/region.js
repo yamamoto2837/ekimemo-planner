@@ -3,7 +3,7 @@
 //
 // 都道府県ごとの達成率と残りの駅数を一覧にする。
 // ・達成率は廃駅も含めた全駅で計算する（全国の合計が取り込み画面と一致する）
-// ・残りの駅数は「行ける駅」と「未アクセスの廃駅」に分けて出す
+// ・残りの駅数は廃駅も含める（駅メモでは廃駅も、近くに行けば取れる）
 // 都道府県を押すと、その県の残りの駅を路線ごとにまとめて表示する。
 // ============================================================
 
@@ -62,7 +62,7 @@ function renderRegion() {
     for (let p = r.from; p <= r.to; p++) {
       total += stats[p].total;
       done += stats[p].done;
-      remain += stats[p].remainingActive.length;
+      remain += stats[p].remaining.length;   // 廃駅も含めた残り
     }
     const c = el('div', 'card region-card');
     c.append(el('span', 'region-name', r.name), el('b', '', formatRate(done, total)), el('span', '', `残り ${remain} 駅`));
@@ -76,8 +76,8 @@ function renderRegion() {
 
   // --- 都道府県の一覧 ---
   const rows = stats.slice(1);
-  if (prefSort === 'remainAsc') rows.sort((a, b) => a.remainingActive.length - b.remainingActive.length || a.pref - b.pref);
-  if (prefSort === 'remainDesc') rows.sort((a, b) => b.remainingActive.length - a.remainingActive.length || a.pref - b.pref);
+  if (prefSort === 'remainAsc') rows.sort((a, b) => a.remaining.length - b.remaining.length || a.pref - b.pref);
+  if (prefSort === 'remainDesc') rows.sort((a, b) => b.remaining.length - a.remaining.length || a.pref - b.pref);
   if (prefSort === 'rateDesc') rows.sort((a, b) => rateOf(b.done, b.total) - rateOf(a.done, a.total) || a.pref - b.pref);
   if (prefSort === 'rateAsc') rows.sort((a, b) => rateOf(a.done, a.total) - rateOf(b.done, b.total) || a.pref - b.pref);
 
@@ -100,7 +100,7 @@ function prefRow(s) {
   fill.style.width = rateOf(s.done, s.total) * 100 + '%';
   bar.append(fill);
 
-  const remain = s.remainingActive.length;
+  const remain = s.remaining.length;   // 廃駅も含めた残り
   head.append(
     el('span', 'pref-name', prefName(s.pref)),
     bar,
@@ -121,17 +121,17 @@ function prefDetail(s) {
   mapLink.href = '#map/pref/' + s.pref;
   links.append(mapLink);
   box.append(links);
-  if (s.remainingClosed.length > 0) {
-    box.append(el('p', 'help', `このほか、未アクセスの廃駅が ${s.remainingClosed.length} 駅あります（もう行けないため下には出していません）。`));
-  }
-  if (s.remainingActive.length === 0) {
-    box.append(el('p', '', 'この県の行ける駅は、すべてアクセス済みです。'));
+  if (s.remaining.length === 0) {
+    box.append(el('p', '', 'この県の駅は、すべてアクセス済みです。'));
     return box;
+  }
+  if (s.remainingClosed.length > 0) {
+    box.append(el('p', 'help', `残り ${s.remaining.length} 駅のうち、廃駅が ${s.remainingClosed.length} 駅あります（「（廃駅）」と書いた駅）。`));
   }
 
   // 路線ごとにまとめる（乗換駅は、通る路線それぞれに出る）
   const byLine = new Map();
-  for (const u of s.remainingActive) {
+  for (const u of s.remaining) {
     const seenLines = new Set();
     for (const c of MASTER.units[u].codes) {
       const lc = MASTER.stations[c].line;
@@ -156,7 +156,7 @@ function prefDetail(s) {
     const a = el('a', 'pref-line-name', line.name);
     a.href = lineHref(lc);
     li.append(a, el('span', 'remain', ` ${units.length} 駅`));
-    li.append(el('div', 'pref-line-stations', units.map(u => MASTER.units[u].name).join('、')));
+    li.append(el('div', 'pref-line-stations', units.map(u => MASTER.units[u].name + (MASTER.units[u].closed ? '（廃駅）' : '')).join('、')));
     ul.append(li);
   }
   box.append(ul);
