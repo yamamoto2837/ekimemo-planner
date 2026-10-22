@@ -231,5 +231,7 @@ function stationPopup(p) {
   });
   if (lineCds.length > MAX_POPUP_LINES) lines.append(` ほか ${lineCds.length - MAX_POPUP_LINES} 路線`);
   box.append(lines);
+  const memo = memoView(stationMemo(p.u));   // この駅のメモ（memo.js）
+  if (memo) box.append(memo);
   return box;
 }

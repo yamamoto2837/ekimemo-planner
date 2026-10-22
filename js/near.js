@@ -217,6 +217,9 @@ function nearItem(p) {
   route.target = '_blank';
   route.rel = 'noopener';
 
-  li.append(head, lines, route);
+  li.append(head, lines);
+  const memo = memoView(stationMemo(p.u));   // この駅のメモ（memo.js）
+  if (memo) li.append(memo);
+  li.append(route);
   return li;
 }

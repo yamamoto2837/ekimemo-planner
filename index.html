@@ -56,6 +56,10 @@
       <label for="lineFind" class="label">路線を探す</label>
       <input type="search" id="lineFind" placeholder="路線名の一部（例: 山田線）">
       <ul id="lineFindResults" class="find-results"></ul>
+      <details class="memo-list-box">
+        <summary id="memoListSummary">メモのある路線・駅</summary>
+        <div id="memoList"></div>
+      </details>
     </div>
     <div id="lineDetail"></div>
   </section>
@@ -198,6 +202,7 @@
 <script src="js/db.js"></script>
 <script src="js/progress.js"></script>
 <script src="js/prefs.js"></script>
+<script src="js/memo.js"></script>
 <script src="js/import.js"></script>
 <script src="js/collect.js"></script>
 <script src="js/linedetail.js"></script>

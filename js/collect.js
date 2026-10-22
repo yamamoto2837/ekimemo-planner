@@ -135,5 +135,7 @@ function lineItem(v) {
   }
 
   li.append(head, bar, sub, stations);
+  const memo = memoView(lineMemo(v.stat.cd));   // この路線のメモ（memo.js）
+  if (memo) li.append(memo);
   return li;
 }

@@ -160,6 +160,10 @@ function renderLineDetail(cd) {
   links.append(mapLink);
   head.append(links);
 
+  // この路線のメモ（打ち込むと自動で保存される）
+  head.append(memoEditor('line', currentLineCd, line.name, 'この路線のメモ',
+    '例: 朝の1本目で端まで行き、折り返しで途中駅を回る').box);
+
   // 並び順についての注意
   if (line.shape === 'branch' || line.shape === 'loop') {
     head.append(el('p', 'help', line.shape === 'loop'
@@ -226,6 +230,80 @@ function stationRow(r, lineCd) {
     body.append(t);
   }
 
+  // この駅のメモ（駅メモの駅ごと。乗換駅なら、どの路線から見ても同じメモ）
+  const memoText = stationMemo(r.station.u);
+  const view = memoView(memoText);
+  if (view) body.append(view);
+  const memoButton = el('button', 'memo-button', memoText.trim() ? 'メモを直す' : 'メモ');
+  memoButton.type = 'button';
+  memoButton.addEventListener('click', () => toggleStationMemo(li, r, lineCd));
+  body.append(memoButton);
+
   li.append(body);
   return li;
+}
+
+// 駅のメモ欄を開く・閉じる
+function toggleStationMemo(li, r, lineCd) {
+  const body = li.querySelector('.st-body');
+  const opened = body.querySelector('.memo-editor');
+  if (opened) {
+    // 閉じる：すぐ保存して、行を作り直す（書いたメモが表示される）
+    flushMemoSave();
+    li.replaceWith(stationRow(r, lineCd));
+    return;
+  }
+  body.querySelector('.memo-view')?.remove();
+  const editor = memoEditor('station', r.station.u, r.unit.name, `${r.unit.name}のメモ`, '例: 北口のバス停から乗り継ぐ');
+  const close = el('button', 'memo-close', '閉じる');
+  close.type = 'button';
+  close.addEventListener('click', () => toggleStationMemo(li, r, lineCd));
+  editor.box.append(close);
+  body.querySelector('.memo-button').before(editor.box);
+  body.querySelector('.memo-button').hidden = true;
+  editor.textarea.focus();
+}
+
+// ---------- メモのある路線・駅の一覧 ----------
+
+function renderMemoList() {
+  const box = document.getElementById('memoList');
+  const summary = document.getElementById('memoListSummary');
+  if (!box) return;
+  const lines = memoEntries('line');
+  const stations = memoEntries('station');
+  summary.textContent = `メモのある路線・駅（${lines.length + stations.length} 件）`;
+  box.replaceChildren();
+  if (lines.length + stations.length === 0) {
+    box.append(el('p', 'help', 'まだメモはありません。路線を開いて、路線や駅のメモを書けます。'));
+    return;
+  }
+
+  const ul = el('ul', 'memo-list');
+  for (const [cd, m] of lines) {
+    const li = el('li', '');
+    const known = hasKey(MASTER.lines, cd);
+    const a = el('a', '', `${known ? MASTER.lines[cd].name : m.name}（路線）`);
+    if (known) a.href = lineHref(cd);
+    li.append(a);
+    if (!known) li.append(el('span', 'muted', '（今の駅マスタに見つかりません）'));
+    li.append(el('div', 'memo-view', m.text));
+    ul.append(li);
+  }
+  for (const [u, m] of stations) {
+    const li = el('li', '');
+    const unit = hasKey(MASTER.units, u) ? MASTER.units[u] : null;
+    if (unit) {
+      // 駅のメモは、その駅を通る路線（最初の1つ）へ移る
+      const lc = MASTER.stations[unit.codes[0]].line;
+      const a = el('a', '', `${unit.name}（${prefName(unit.pref)}）`);
+      if (MASTER.lines[lc]) a.href = lineHref(lc);
+      li.append(a);
+    } else {
+      li.append(el('span', '', m.name), el('span', 'muted', '（今の駅マスタに見つかりません）'));
+    }
+    li.append(el('div', 'memo-view', m.text));
+    ul.append(li);
+  }
+  box.append(ul);
 }

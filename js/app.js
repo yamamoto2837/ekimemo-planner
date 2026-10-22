@@ -70,6 +70,9 @@ function showScreen(name) {
   // 画面の指定が無いとき：進捗があれば先頭のタブ（地域別）、無ければ取り込み画面
   if (!SCREENS.includes(name)) name = appState.progress ? 'pref' : 'import';
   for (const s of SCREENS) document.getElementById(s).hidden = (s !== name);
+  // メモが書き換わっているかもしれないので、メモを出す画面は開くたびに描き直す
+  if (name === 'collect') renderCollect();
+  if (name === 'near') renderNear();
   document.querySelectorAll('.tabs a').forEach(a => {
     if (a.dataset.screen === name) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -115,6 +118,10 @@ async function startApp() {
   initRegionScreen();    // region.js
   initMapScreen();       // map.js
   initNearScreen();      // near.js
+
+  // メモは進捗が無くても使えるので、先に読み込む（memo.js）
+  await loadMemos();
+  renderMemoList();
 
   let progress = null;
   try {

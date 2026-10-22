@@ -7,7 +7,7 @@
 
 const DB_NAME = 'ekimemo-planner';   // データベースの名前
 const DB_VERSION = 1;
-const STORE_NAME = 'progress';       // 進捗を入れる場所
+const STORE_NAME = 'progress';       // 保存する場所（進捗もメモも、名前を分けてここに入れる）
 const PROGRESS_KEY = 'current';      // 最新の進捗を入れるときの名前
 
 // データベースを開く（初めてのときは作る）
@@ -26,24 +26,34 @@ function openDatabase() {
   });
 }
 
-// 保存されている進捗を読む。無ければ null を返す。
-// 中身: { ids: [...], importedAt: '日時', masterBuiltAt: '駅マスタの作成日時' }
-async function loadProgress() {
+// 名前（key）を付けて保存したものを読む。無ければ null を返す。
+async function loadValue(key) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(PROGRESS_KEY);
+    const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key);
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
   });
 }
 
-// 進捗を保存する（前の内容は上書きされる）
-async function saveProgress(progress) {
+// 名前（key）を付けて保存する（前の内容は上書きされる）
+async function saveValue(key, value) {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(progress, PROGRESS_KEY);
+    tx.objectStore(STORE_NAME).put(value, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+// 保存されている進捗を読む。無ければ null を返す。
+// 中身: { ids: [...], importedAt: '日時', masterBuiltAt: '駅マスタの作成日時' }
+function loadProgress() {
+  return loadValue(PROGRESS_KEY);
+}
+
+// 進捗を保存する（前の内容は上書きされる）
+function saveProgress(progress) {
+  return saveValue(PROGRESS_KEY, progress);
 }
