@@ -366,6 +366,7 @@ select {
 .route-picked-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-height: 180px; overflow: auto; }
 .route-picked-list p { margin: 0; }
 .picked-chip { font-size: 13px; padding: 2px 10px; }
+.picked-chip.picked-done { color: var(--muted); }
 .route-pick-stations { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 8px; max-height: 320px; overflow: auto; }
 .route-region { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
 .route-region-name { font-weight: bold; min-width: 5.5em; }

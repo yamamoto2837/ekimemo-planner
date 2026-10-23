@@ -34,13 +34,14 @@ function initRouteScreen() {
 }
 
 // 回る駅の一覧
-//   駅を選ぶとき … 選んだ駅のうち、いま未アクセスの駅
+//   駅を選ぶとき … 選んだ駅（アクセス済みの駅も選べる。「廃駅も対象にする」を外したときは、未アクセスの廃駅を除く）
 //   都道府県で選ぶとき … 選んだ都道府県の未アクセス駅（「廃駅も対象にする」なら廃駅も）
 function routeTargets() {
   if (!appState.resolved) return [];
   if (routeSettings.mode === 'stations') {
     const accessed = appState.resolved.accessed;
-    return [...routeSettings.picked].filter(u => MASTER.units[u] && !accessed.has(u));
+    return [...routeSettings.picked].filter(u => MASTER.units[u] &&
+      (accessed.has(u) || routeSettings.withClosed || !MASTER.units[u].closed));
   }
   const stats = getPrefStats();
   if (!stats) return [];
@@ -241,6 +242,7 @@ function renderRouteResult(plan, startUnit, targetSet) {
     name.append(el('small', 'muted', `（${prefName(unit.pref)}）`));
     const headRow = el('div', 'route-stop-head');
     headRow.append(num, name);
+    if (appState.resolved.accessed.has(u)) headRow.append(el('span', 'plan-check', '✓ アクセス済み'));
     li.append(headRow);
 
     // 前の駅からの乗り方
