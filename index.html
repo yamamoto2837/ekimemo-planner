@@ -184,7 +184,7 @@
   <!-- ===== 巡回ルート（F7） ===== -->
   <section id="route" class="screen" hidden>
     <h2>巡回ルート</h2>
-    <p class="help">選んだ都道府県の未アクセス駅を、線路に沿って回る順番を考えます。乗り換え時間や運行本数は考えません。</p>
+    <p class="help">選んだ未アクセス駅を、線路に沿って回る順番を考えます。乗り換え時間や運行本数は考えません。</p>
 
     <div id="routeEmpty" class="panel" hidden>
       <p>まだ進捗が取り込まれていません。<a href="#import">データ取り込み</a>から取り込んでください。</p>
@@ -192,7 +192,47 @@
 
     <div id="routeBody" hidden>
       <div class="panel filters">
-        <details open class="route-pref-box">
+        <!-- 回る駅の選び方（routepick.js） -->
+        <div class="chips" id="routeModeChips" role="group" aria-label="回る駅の選び方">
+          <button type="button" class="chip" data-mode="stations">駅を選ぶ</button>
+          <button type="button" class="chip" data-mode="prefs">都道府県で選ぶ</button>
+        </div>
+
+        <!-- 駅を1つずつ選ぶ -->
+        <div id="routePickBox" class="route-pick">
+          <p class="help">地図の駅を押す・駅名を入れる・路線から選ぶ、のどれでも「回る駅」に入ります。</p>
+          <div class="route-picked">
+            <div class="route-picked-head">
+              <b id="routePickedCount">回る駅 0 駅</b>
+              <button type="button" id="routePickClear" class="memo-button">すべて外す</button>
+            </div>
+            <div id="routePickedList" class="route-picked-list"></div>
+          </div>
+          <details open class="route-pick-part" id="routePickMapBox">
+            <summary>地図で選ぶ</summary>
+            <p class="help">赤い印が未アクセス駅（点線の印は廃駅）、青い印が回る駅です。印を押すと回る駅に入り、もう一度押すと外れます。</p>
+            <div id="routePickMap" class="route-map"></div>
+          </details>
+          <details class="route-pick-part">
+            <summary>駅名で足す</summary>
+            <form id="routePickNameForm" class="filter-row">
+              <input type="search" id="routePickName" placeholder="駅名（例: 米子）" aria-label="足す駅の名前">
+              <button type="submit">足す</button>
+            </form>
+            <p id="routePickNameMsg" class="message" role="status"></p>
+            <div id="routePickNameChoices" class="buttons"></div>
+          </details>
+          <details class="route-pick-part">
+            <summary>路線から選ぶ</summary>
+            <div class="filter-row">
+              <input type="search" id="routePickLineSearch" placeholder="路線名で絞り込み（例: 因美）" aria-label="路線名で絞り込み">
+              <select id="routePickLine" aria-label="路線"></select>
+            </div>
+            <div id="routePickLineStations"></div>
+          </details>
+        </div>
+
+        <details open class="route-pref-box" id="routePrefBox" hidden>
           <summary id="routePrefSummary">都道府県を選ぶ</summary>
           <div id="routePrefList"></div>
           <button type="button" id="routeClearPrefs" class="memo-button">選んだ都道府県をすべて外す</button>
@@ -363,6 +403,7 @@
 <script src="js/sync.js"></script>
 <script src="js/routeplan.js"></script>
 <script src="js/route.js"></script>
+<script src="js/routepick.js"></script>
 <script src="js/plans.js"></script>
 <script src="js/myroute.js"></script>
 <script src="js/radarplan.js"></script>
