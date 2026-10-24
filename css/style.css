@@ -422,6 +422,14 @@ select {
 .myroute-cand-nums { font-size: 12px; color: var(--muted); }
 .myroute-radar { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--code-bg); }
 .myroute-radar h4 { margin: 0 0 4px; }
+.plan-edit { margin: 8px 0; font-size: 14px; }
+.plan-edit > summary { cursor: pointer; color: var(--accent); }
+.plan-edit .filter-row { margin-top: 6px; }
+.plan-edit input[type="text"] { flex: 2 1 180px; min-width: 0; }
+.plan-edit input[type="text"], .plan-edit input[type="date"] {
+  font: inherit; font-size: 15px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+}
 .plan-line-summary { font-size: 14px; font-weight: bold; overflow-wrap: anywhere; margin: 8px 0; }
 .route-radar-n { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; margin-top: 6px; }
 .route-radar-n input { width: 5em; font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }

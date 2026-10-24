@@ -48,7 +48,8 @@ function getPlanData() {
 async function replacePlanData(data) {
   planData = data;
   await saveValue(PLAN_KEY, planData);
-  const editing = document.activeElement && document.activeElement.classList.contains('plan-note');
+  // 書いている途中なら描き直さない（メモ、プラン名・日付）
+  const editing = document.activeElement && (document.activeElement.classList.contains('plan-note') || document.activeElement.classList.contains('plan-edit-input'));
   if (!editing) renderPlans();
 }
 
@@ -214,6 +215,18 @@ function planExtraLine(kind, title, units, accessed, plan, strong) {
   return line;
 }
 
+// プラン名と日付を変える
+async function updatePlanInfo(id, name, date) {
+  const plan = planData.plans[id];
+  if (!plan || plan.deleted) return;
+  plan.name = name;
+  plan.date = date;
+  touchPlan(plan);
+  await storePlans();
+  openPlanId = id;   // 変えたプランは開いたままにする
+  renderPlans();
+}
+
 function setPlanNote(id, text, status) {
   const plan = planData.plans[id];
   if (!plan || plan.note === text) return;
@@ -316,6 +329,40 @@ function planCard(plan) {
   buttons.append(recordBtn, delBtn);
   card.append(buttons);
   card.append(el('p', 'help', '遠征のあとに駅メモマップ2のエクスポートを取り込んでから「結果を記録する」を押すと、回れた駅・回れなかった駅が記録されます。'));
+
+  // プラン名・日付を変える
+  const edit = el('details', 'plan-edit');
+  edit.append(el('summary', '', 'プラン名・日付を変える'));
+  const editRow = el('div', 'filter-row');
+  const nameInput = el('input', 'plan-edit-input');
+  nameInput.type = 'text';
+  nameInput.maxLength = 60;
+  nameInput.value = plan.name;
+  nameInput.setAttribute('aria-label', 'プランの名前');
+  const dateInput = el('input', 'plan-edit-input');
+  dateInput.type = 'date';
+  dateInput.value = plan.date;
+  dateInput.setAttribute('aria-label', '遠征の日付');
+  const saveBtn = el('button', 'primary', '変更を保存');
+  saveBtn.type = 'button';
+  const editMsg = el('p', 'message');
+  saveBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) { editMsg.textContent = 'プラン名を入れてください。'; editMsg.className = 'message error'; return; }
+    if (!dateInput.value) { editMsg.textContent = '日付を入れてください。'; editMsg.className = 'message error'; return; }
+    if (name === plan.name && dateInput.value === plan.date) { editMsg.textContent = '変わっていません。'; editMsg.className = 'message'; return; }
+    saveBtn.disabled = true;
+    try {
+      await updatePlanInfo(plan.id, name, dateInput.value);
+    } catch (e) {
+      editMsg.textContent = '保存できませんでした: ' + e.message;
+      editMsg.className = 'message error';
+      saveBtn.disabled = false;
+    }
+  });
+  editRow.append(nameInput, dateInput, saveBtn);
+  edit.append(editRow, editMsg);
+  card.append(edit);
 
   // メモ
   const noteLabel = el('label', 'memo-label');
