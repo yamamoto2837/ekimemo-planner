@@ -12,6 +12,9 @@ data/station[0-9]*.csv
 data/line[0-9]*.csv
 data/join[0-9]*.csv
 
+# 国土数値情報（鉄道データ）の元のファイル（線路の形は master/shapes.js に変換して送る）
+data/n02/
+
 # 検証結果（アクセス済みの駅の一覧などを含む）
 docs/step2_検証結果/
 

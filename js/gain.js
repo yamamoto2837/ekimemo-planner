@@ -98,7 +98,7 @@ function drawGainMap(div, paths, stops, gained) {
   }).addTo(map);
   const pos = u => [MASTER.units[u].lat, MASTER.units[u].lon];
   for (const p of paths) {
-    const pts = p.filter(u => MASTER.units[u]).map(pos);
+    const pts = pathLatLngs(p);   // shapes.js（線路の形に沿って）
     if (pts.length > 1) L.polyline(pts, { color: cssColor('--accent'), weight: 3, opacity: 0.7 }).addTo(map);
   }
   for (const u of gained) {

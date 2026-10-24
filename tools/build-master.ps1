@@ -623,3 +623,4 @@ if ($changeEntry) {
 }
 Write-Host ""
 Write-Host "出力: $outFile ($([math]::Round((Get-Item $outFile).Length / 1KB)) KB)"
+Write-Host "（地図の線路の形も作り直すときは、続けて tools\build-shapes.ps1 を動かしてください）"

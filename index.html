@@ -403,6 +403,7 @@
 
 <footer class="app-footer">
   <p>駅データ：<a href="https://ekidata.jp/" target="_blank" rel="noopener">駅データ.jp</a> を加工して使用</p>
+  <p>線路の形：「<a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2024.html" target="_blank" rel="noopener">国土数値情報（鉄道データ）</a>」（国土交通省）を加工して作成</p>
   <p id="masterInfo" class="muted"></p>
   <p><a href="#updates">駅マスタの更新の記録</a></p>
   <p id="syncFooter" class="muted"></p>
@@ -415,6 +416,8 @@
 <script src="master/master.js"></script>
 <!-- 駅マスタの更新の記録（無くてもアプリは動く） -->
 <script src="master/changes.js"></script>
+<!-- 線路の形（tools/build-shapes.ps1 で作ったもの。無くてもアプリは動き、線は直線になる） -->
+<script src="master/shapes.js"></script>
 <!-- アプリの処理（app.js が全体のまとめ役。画面の準備は全部読み込んでから始める） -->
 <script src="js/app.js"></script>
 <script src="js/db.js"></script>
@@ -428,6 +431,7 @@
 <script src="js/map.js"></script>
 <script src="js/near.js"></script>
 <script src="js/sync.js"></script>
+<script src="js/shapes.js"></script>
 <script src="js/routeplan.js"></script>
 <script src="js/route.js"></script>
 <script src="js/routepick.js"></script>

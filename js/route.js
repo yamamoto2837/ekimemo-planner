@@ -505,12 +505,10 @@ function drawRouteMap(plan, startUnit, extras) {
     routeLayerGroup.clearLayers();
   }
 
-  // 道すじ（通る駅を順につなぐ）
-  const pts = [];
-  for (const leg of plan.legs) for (const r of leg.rides) for (const u of r.path) {
-    const unit = MASTER.units[u];
-    pts.push([unit.lat, unit.lon]);
-  }
+  // 道すじ（通る駅を順に、線路の形に沿ってつなぐ。shapes.js）
+  const seq = [];
+  for (const leg of plan.legs) for (const r of leg.rides) for (const u of r.path) seq.push(u);
+  const pts = pathLatLngs(seq);
   if (pts.length > 1) L.polyline(pts, { color: cssColor('--accent'), weight: 3, opacity: 0.7 }).addTo(routeLayerGroup);
 
   // ルートビューン（緑）とレーダー（紫。取るチェックイン駅と点線で結ぶ）で取る駅
