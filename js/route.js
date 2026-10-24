@@ -18,12 +18,14 @@ const routeSettings = {
   pass: new Set(),    // 自分で「途中で取る」にした駅（寄らずに、乗っている途中で取る）
   autoPass: true,     // 乗っている途中で取れる駅には寄らない（自動で調べる）
   radarN: 10,         // レーダーで取れる駅の数（いる場所から近い順に何駅まで取れるか）
+  splitTransfers: true, // 立ち寄る駅を、乗換駅・折り返す駅にまとめる
   prefs: new Set(),   // 選んだ都道府県
   round: false,       // 出発駅に戻ってくるか
   withClosed: true,   // 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れる）
 };
 let routeLeafletMap = null;
 let routeLayerGroup = null;
+let routeMapDiv = null;   // 順番の結果の地図の入れ物（使い回す）
 
 // ---------- 準備（app.js から呼ばれる） ----------
 
@@ -39,6 +41,9 @@ function initRouteScreen() {
   const autoPass = document.getElementById('routeAutoPass');
   autoPass.checked = routeSettings.autoPass;
   autoPass.addEventListener('change', () => { routeSettings.autoPass = autoPass.checked; storePick(); });
+  const split = document.getElementById('routeSplitTransfers');
+  split.checked = routeSettings.splitTransfers;
+  split.addEventListener('change', () => { routeSettings.splitTransfers = split.checked; storePick(); });
   const radarN = document.getElementById('routeRadarN');
   radarN.value = routeSettings.radarN;
   radarN.addEventListener('change', () => {
@@ -159,12 +164,20 @@ function runRoute() {
     try {
       plan = planRoute(targets, start.unit, routeSettings.round);
       // 乗っている途中で取れる駅には寄らない（出発駅・レーダーを使う駅・ルートビューンの2駅は残す）
+      const keep = routeKeepStops();   // routepick.js
+      if (start.unit) keep.add(start.unit);
       if (routeSettings.autoPass) {
-        const keep = routeKeepStops();   // routepick.js
-        if (start.unit) keep.add(start.unit);
         plan = dropPassStops(plan, keep, routeSettings.round);   // routeplan.js
       } else {
         plan.dropped = [];
+      }
+      // 立ち寄る駅を、乗換駅・折り返す駅に置き直す（道すじは変えない）
+      // 「寄らない」がオフのときは、選んだ駅にも立ち寄る
+      if (routeSettings.splitTransfers) {
+        const keep2 = routeSettings.autoPass ? keep : new Set([...keep, ...plan.order]);
+        const before = plan.dropped;
+        plan = splitAtTransfers(plan, keep2);   // routeplan.js
+        plan.dropped = [...new Set([...before, ...plan.removed.filter(u => targets.includes(u))])];
       }
       addLegPass(plan.legs);   // routeplan.js（区間ごとの、途中で取れる駅）
     } catch (e) {
@@ -208,6 +221,7 @@ function renderRouteResult(plan, startUnit, targetSet) {
   const head = el('div', 'panel');
   head.append(el('h3', '', routeSettings.mode === 'stations' ? `${visitCount} 駅にチェックインする順番` : `${visitCount} 駅を回る順番`));
   head.append(el('p', 'detail-count', `線路に沿った距離 約 ${Math.round(plan.totalKm)} km`));
+  head.append(el('p', 'plan-line-summary', routeLineSummary(plan)));   // routeplan.js（路線ごとにまとめた書き方）
   if (dropped.size) {
     head.append(el('p', 'help', `乗っている途中で取れるため、次の ${dropped.size} 駅には寄らない順番にしました（「途中で取る」として区間に並べています）：${[...dropped].map(u => MASTER.units[u].name).join('、')}`));
   }
@@ -283,11 +297,13 @@ function renderRouteResult(plan, startUnit, targetSet) {
   save.append(row, saveMsg);
   box.append(save);
 
-  // 地図
+  // 地図（地図の入れ物は使い回す。作り直すと、地図の部品が描きかけのままエラーになることがあるため）
   const mapPanel = el('div', 'panel');
-  const mapDiv = el('div', 'route-map');
-  mapDiv.id = 'routeMapView';
-  mapPanel.append(mapDiv);
+  if (!routeMapDiv) {
+    routeMapDiv = el('div', 'route-map');
+    routeMapDiv.id = 'routeMapView';
+  }
+  mapPanel.append(routeMapDiv);
   box.append(mapPanel);
 
   // 順番の一覧
@@ -397,13 +413,17 @@ function drawRouteMap(plan, startUnit, extras) {
     document.getElementById('routeMapView').replaceChildren(el('p', 'message error map-error', '地図の部品を読み込めませんでした。'));
     return;
   }
-  if (routeLeafletMap) { routeLeafletMap.remove(); routeLeafletMap = null; }
-  routeLeafletMap = L.map('routeMapView', { preferCanvas: true });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(routeLeafletMap);
-  routeLayerGroup = L.layerGroup().addTo(routeLeafletMap);
+  // 地図は1回だけ作り、2回目からは描いた印を消して描き直す
+  if (!routeLeafletMap) {
+    routeLeafletMap = L.map(routeMapDiv, { preferCanvas: true });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(routeLeafletMap);
+    routeLayerGroup = L.layerGroup().addTo(routeLeafletMap);
+  } else {
+    routeLayerGroup.clearLayers();
+  }
 
   // 道すじ（通る駅を順につなぐ）
   const pts = [];

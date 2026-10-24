@@ -51,6 +51,7 @@ function initRoutePick() {
       if (Array.isArray(saved.pass)) routeSettings.pass = new Set(saved.pass.filter(u => MASTER.units[u]));
       if (typeof saved.autoPass === 'boolean') routeSettings.autoPass = saved.autoPass;
       if (Number.isInteger(saved.radarN) && saved.radarN >= 1 && saved.radarN <= 50) routeSettings.radarN = saved.radarN;
+      if (typeof saved.splitTransfers === 'boolean') routeSettings.splitTransfers = saved.splitTransfers;
     }
   } catch (e) { /* 覚えていなくても動く */ }
 
@@ -111,6 +112,7 @@ function storePick() {
       pass: [...routeSettings.pass],
       autoPass: routeSettings.autoPass,
       radarN: routeSettings.radarN,
+      splitTransfers: routeSettings.splitTransfers,
     }));
   } catch (e) { /* 覚えられなくても動く */ }
 }

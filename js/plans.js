@@ -94,6 +94,8 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets, ex
     targets: [...new Set([...route.order.filter(u => targets.has(u)), ...(route.dropped || []), ...(extras ? extras.targets : [])])],
     // 選んだけれど、乗っている途中で取れるので寄らないことにした駅
     dropped: route.dropped || [],
+    // 路線ごとにまとめた書き方（例: 江北→（JR佐世保線）→佐世保→…）
+    summary: routeLineSummary(route),   // routeplan.js
     // レーダーで取る駅
     // （stop … 使うチェックイン駅、leg … 乗っている途中で使う区間の番号、near … 使う場所でいちばん近い駅、rank … 近い順の何番目か）
     radar: extras ? extras.radar.map(r => ({ u: r.u, stop: r.stop, leg: r.leg, near: r.near, rank: r.rank })) : [],

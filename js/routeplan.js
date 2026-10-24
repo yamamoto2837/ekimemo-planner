@@ -577,6 +577,81 @@ function dropPassStops(plan, keep, round) {
   };
 }
 
+// 2駅の間の線の長さ（グラフから探す。見つからなければ直線距離）
+function routeEdgeKm(g, a, b, line) {
+  const i = g.index.get(a), j = g.index.get(b);
+  if (i !== undefined && j !== undefined) {
+    for (let k = g.start[i]; k < g.start[i + 1]; k++) if (g.to[k] === j && g.line[k] === line) return g.weight[k];
+    for (let k = g.start[i]; k < g.start[i + 1]; k++) if (g.to[k] === j) return g.weight[k];
+  }
+  return routeDistKm(MASTER.units[a], MASTER.units[b]);
+}
+
+// 道すじはそのままに、立ち寄る駅を「出発駅・到着駅・乗換駅・折り返す駅・keep の駅」に置き直す。
+//   乗換駅 … 路線が変わる駅（「JR筑肥線(…)」のように区間が分かれていても、同じ名前の路線は1本とみなす）
+//   折り返す駅 … 同じ線を引き返す駅
+//   keep … 立ち寄る駅として残す駅（レーダーを使う駅として選んだ駅、ルートビューンの2駅など）
+// 戻り値: 新しい plan（order と legs を置き直したもの。removed: 立ち寄らなくなった駅）
+function splitAtTransfers(plan, keep) {
+  if (plan.order.length < 2 || plan.legs.some(l => !isFinite(l.km))) return { ...plan, removed: [] };
+  const g = routeGraph();
+  // 道すじを、駅から駅への線の並びにする
+  const edges = [];
+  for (const l of plan.legs) for (const r of l.rides) {
+    for (let i = 0; i + 1 < r.path.length; i++) edges.push({ a: r.path[i], b: r.path[i + 1], line: r.line });
+  }
+  if (edges.length === 0) return { ...plan, removed: [] };
+  const base = e => e.line === 'transfer' ? null : routeLineBase(e.line);
+  // 区切る場所（edges の番号 i の「終わりの駅」で区切る）
+  const cut = new Set();
+  let lastBase = null, lastIdx = -1;
+  for (let i = 0; i < edges.length; i++) {
+    const b = base(edges[i]);
+    if (b === null) continue;
+    if (lastBase !== null && b !== lastBase) cut.add(lastIdx);   // 路線が変わる：前の路線の終わりの駅で区切る
+    lastBase = b; lastIdx = i;
+  }
+  for (let i = 0; i + 1 < edges.length; i++) {
+    if (edges[i].a === edges[i + 1].b) cut.add(i);               // 引き返す：折り返す駅で区切る
+    if (keep.has(edges[i].b)) cut.add(i);
+  }
+  // 区切った場所ごとに、区間を作り直す
+  const order = [edges[0].a];
+  const legs = [];
+  let cur = [];
+  const flush = () => {
+    const rides = [];
+    let km = 0;
+    for (const e of cur) {
+      const w = routeEdgeKm(g, e.a, e.b, e.line);
+      km += w;
+      const last = rides[rides.length - 1];
+      if (last && last.line === e.line) { last.to = e.b; last.km += w; last.path.push(e.b); }
+      else rides.push({ line: e.line, from: e.a, to: e.b, km: w, path: [e.a, e.b] });
+    }
+    legs.push({ from: cur[0].a, to: cur[cur.length - 1].b, km, rides });
+    order.push(cur[cur.length - 1].b);
+    cur = [];
+  };
+  edges.forEach((e, i) => {
+    cur.push(e);
+    if (cut.has(i) || i === edges.length - 1) flush();
+  });
+  // 乗り換えの線だけの区間（同じ駅グループの乗り換え）は、前の区間につなげる
+  for (let i = legs.length - 1; i > 0; i--) {
+    if (legs[i].rides.every(r => r.line === 'transfer')) {
+      legs[i - 1].rides.push(...legs[i].rides);
+      legs[i - 1].to = legs[i].to;
+      legs[i - 1].km += legs[i].km;
+      legs.splice(i, 1);
+      order.splice(i, 1);
+    }
+  }
+  const inOrder = new Set(order);
+  const removed = [...new Set(plan.order)].filter(u => !inOrder.has(u));
+  return { ...plan, order, legs, totalKm: legs.reduce((s, l) => s + l.km, 0), removed };
+}
+
 // 区間ごとに、途中で取れる駅（両はしの駅を除く）を leg.pass に入れる
 function addLegPass(legs) {
   for (const l of legs) {
