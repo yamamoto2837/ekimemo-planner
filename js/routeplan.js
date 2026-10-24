@@ -142,7 +142,9 @@ function linkIsolatedGroups(adj, add) {
 
 // target を渡すと、その駅までの道が決まった時点で探すのをやめる（速くなる）
 // target が Set のときは、その中の駅すべての道が決まった時点でやめる
-function routeDijkstra(g, src, target) {
+// weight を渡すと、線の長さの代わりにその重み（Float64Array）で考える（ルートの候補を出すとき）
+function routeDijkstra(g, src, target, weight) {
+  const W = weight || g.weight;
   let left = target instanceof Set ? new Set(target) : null;
   const n = g.ids.length;
   const dist = new Float64Array(n).fill(Infinity);
@@ -186,7 +188,7 @@ function routeDijkstra(g, src, target) {
     if (v === target) break;
     if (left && left.delete(v) && left.size === 0) break;
     for (let k = g.start[v]; k < g.start[v + 1]; k++) {
-      const w = g.to[k], nd = d + g.weight[k];
+      const w = g.to[k], nd = d + W[k];
       if (nd < dist[w]) { dist[w] = nd; prevEdge[w] = k; prevNode[w] = v; push(w, nd); }
     }
   }
@@ -313,14 +315,15 @@ function planRoute(targets, startUnit, round) {
 // 並び orderUnits の、となりどうしの区間ごとに、線路に沿っていちばん短い道を求める。
 // 戻り値: { legs: [{ from, to, km, rides: [{ line, from, to, km, path }] }], guessed: Set, broken: [区間の番号] }
 //   broken … 線路がつながっていない区間（km が Infinity になる）
-function routeLegs(g, orderUnits) {
+//   weight … 道を選ぶときの重み（省くと線の長さ）。km は重みにかかわらず、本当の長さで出す
+function routeLegs(g, orderUnits, weight) {
   const legs = [];
   const guessed = new Set();
   const broken = [];
   for (let i = 0; i + 1 < orderUnits.length; i++) {
     const from = g.index.get(orderUnits[i]), toIdx = g.index.get(orderUnits[i + 1]);
     if (from === undefined || toIdx === undefined) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
-    const r = routeDijkstra(g, from, toIdx);
+    const r = routeDijkstra(g, from, toIdx, weight);
     if (!isFinite(r.dist[toIdx])) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
     const edges = [];
     for (let v = toIdx; v !== from; v = r.prevNode[v]) edges.push({ node: v, prev: r.prevNode[v], line: g.line[r.prevEdge[v]], w: g.weight[r.prevEdge[v]] });
@@ -333,9 +336,163 @@ function routeLegs(g, orderUnits) {
       if (last && last.line === e.line) { last.to = g.ids[e.node]; last.km += e.w; last.path.push(g.ids[e.node]); }
       else rides.push({ line: e.line, from: g.ids[e.prev], to: g.ids[e.node], km: e.w, path: [g.ids[e.prev], g.ids[e.node]] });
     }
-    legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: r.dist[toIdx], rides });
+    legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: edges.reduce((s, e) => s + e.w, 0), rides });
   }
   return { legs, guessed, broken };
+}
+
+// ---------- 5. ルートの候補（自分で作るルート） ----------
+//
+// 立ち寄る駅の順番は決めたまま、区間（立ち寄る駅と駅の間）ごとに道の選び方を変えて、候補を何本か出す。
+//   ・いちばん短い道
+//   ・未アクセス駅を多く通る道 … 「別の道」にすると、増える距離のわりに未アクセス駅が多く増える区間だけ、別の道にする
+//   ・○○→○○ を別の路線で … 1つの区間だけ「別の道」にしたもの
+// 区間の「別の道」は、いちばん短い道で通った線をなるべく避けて選んだ道（長すぎるもの・推定のつなぎを使うものは除く）。
+
+const ROUTE_AVOID_RATE = 10;        // 別の道を探すとき、いちばん短い道の線を何倍の長さとして数えるか
+const ROUTE_ALT_MAX_RATE = 3;       // 別の道は、いちばん短い道の何倍の長さまでにするか
+const ROUTE_ALT_MIN_EXTRA_KM = 15;  // 短い区間でも、これだけは長くてよい
+const ROUTE_TODO_PER_KM = 0.5;      // 増える距離 1km あたり、未アクセス駅がこれだけ増えれば「多く通る道」に使う
+const ROUTE_MAX_CANDIDATES = 5;     // 候補の数の上限
+
+// 通った道すじの印（同じ道の候補を1つにまとめるため）
+function routeSignature(route) {
+  return route.legs.map(l => l.rides.map(r => r.path.join(',')).join('|')).join('/');
+}
+
+// 区間に乗っている途中で取れる駅のうち、未アクセスの駅の数
+function legTodoCount(leg, accessed) {
+  return passAlongRides(leg.rides).filter(u => !accessed.has(u)).length;
+}
+
+// 区間の「別の道」（無ければ null）
+function routeAltLeg(g, leg) {
+  if (!isFinite(leg.km)) return null;
+  const used = new Set();
+  for (const r of leg.rides) for (let i = 0; i + 1 < r.path.length; i++) { used.add(r.path[i] + '>' + r.path[i + 1]); used.add(r.path[i + 1] + '>' + r.path[i]); }
+  const w = new Float64Array(g.weight);
+  for (let v = 0; v < g.ids.length; v++) {
+    for (let k = g.start[v]; k < g.start[v + 1]; k++) {
+      if (g.line[k] !== 'transfer' && used.has(g.ids[v] + '>' + g.ids[g.to[k]])) w[k] *= ROUTE_AVOID_RATE;
+    }
+  }
+  const alt = routeLegs(g, [leg.from, leg.to], w).legs[0];
+  if (!alt || !isFinite(alt.km)) return null;
+  if (alt.km > Math.max(leg.km * ROUTE_ALT_MAX_RATE, leg.km + ROUTE_ALT_MIN_EXTRA_KM)) return null;
+  if (alt.rides.some(r => r.line === 'guess') && !leg.rides.some(r => r.line === 'guess')) return null;
+  if (alt.rides.map(r => r.path.join(',')).join('|') === leg.rides.map(r => r.path.join(',')).join('|')) return null;
+  return alt;
+}
+
+// 区間を並べて、ルートの形（planFixedRoute と同じ形）にする
+function buildFixedRoute(units, legs) {
+  const guessed = new Set();
+  for (const l of legs) for (const r of l.rides) {
+    if (r.line === 'guess' || String(r.line).startsWith('closed:')) for (const u of r.path) guessed.add(u);
+  }
+  const passed = [], along = [];
+  const s1 = new Set(), s2 = new Set();
+  units.forEach((u, i) => {
+    if (!s1.has(u)) { s1.add(u); passed.push(u); }
+    if (!s2.has(u)) { s2.add(u); along.push(u); }
+    const leg = legs[i];
+    if (!leg) return;
+    for (const r of leg.rides) for (const v of r.path) if (!s1.has(v)) { s1.add(v); passed.push(v); }
+    for (const v of passAlongRides(leg.rides)) if (!s2.has(v)) { s2.add(v); along.push(v); }
+  });
+  return { order: units, legs, totalKm: legs.reduce((s, l) => s + l.km, 0), guessed: [...guessed], broken: [], passed, along };
+}
+
+// ルートの候補を出す。units … 立ち寄る駅（順番どおり）
+// 戻り値: { broken: つながらないときの planFixedRoute の結果 or null, candidates: [{ kind, label, route }] }
+function planRouteCandidates(units, accessed) {
+  const g = routeGraph();
+  const shortest = planFixedRoute(units);
+  if (shortest.broken.length) return { broken: shortest, candidates: [] };
+
+  const out = [];
+  const seen = new Set();
+  const push = (kind, label, route) => {
+    const sig = routeSignature(route);
+    if (seen.has(sig) || out.length >= ROUTE_MAX_CANDIDATES) return;
+    seen.add(sig);
+    out.push({ kind, label, route });
+  };
+  push('short', 'いちばん短い道', shortest);
+
+  // 区間ごとの「別の道」と、増える距離・増える未アクセス駅
+  const alts = shortest.legs.map(leg => {
+    const alt = routeAltLeg(g, leg);
+    if (!alt) return null;
+    const extraKm = alt.km - leg.km;
+    const extraTodo = legTodoCount(alt, accessed) - legTodoCount(leg, accessed);
+    return { alt, extraKm, extraTodo };
+  });
+
+  // 未アクセス駅を多く通る道（ルート全体で増えるときだけ）
+  const todoLegs = shortest.legs.map((leg, i) => {
+    const a = alts[i];
+    if (!a || a.extraTodo <= 0) return leg;
+    return a.extraKm <= 0 || a.extraTodo / a.extraKm >= ROUTE_TODO_PER_KM ? a.alt : leg;
+  });
+  if (todoLegs.some((l, i) => l !== shortest.legs[i])) {
+    const route = buildFixedRoute(units, todoLegs);
+    if (route.along.filter(u => !accessed.has(u)).length > shortest.along.filter(u => !accessed.has(u)).length) push('todo', '未アクセス駅を多く通る道', route);
+  }
+
+  // 1つの区間だけ別の道にした候補（ルート全体で、通る未アクセス駅が増えるものだけ。増える数が多い順）
+  const todoOf = route => route.along.filter(u => !accessed.has(u)).length;
+  const baseTodo = todoOf(shortest);
+  const singles = [];
+  alts.forEach((a, i) => {
+    if (!a) return;
+    const legs = shortest.legs.slice();
+    legs[i] = a.alt;
+    const route = buildFixedRoute(units, legs);
+    const gain = todoOf(route) - baseTodo;
+    if (gain > 0) singles.push({ i, route, gain, km: route.totalKm });
+  });
+  singles.sort((x, y) => y.gain - x.gain || x.km - y.km);
+  for (const s of singles) {
+    push('alt', `${MASTER.units[units[s.i]].name}→${MASTER.units[units[s.i + 1]].name} を別の路線で`, s.route);
+  }
+  return { broken: null, candidates: out };
+}
+
+// 路線ごとにまとめた書き方：「江北→（JR佐世保線）→佐世保→（松浦鉄道西九州線）→伊万里」
+// 同じ路線が続くところ（「JR筑肥線(…)」のように区間が分かれていても同じ名前）は1つにまとめる
+function routeLineBase(lc) {
+  if (lc === 'guess') return '線路データ無し（推定）';
+  if (String(lc).startsWith('closed:')) {
+    const real = lc.slice(7);
+    return (MASTER.lines[real] ? MASTER.lines[real].name : real).replace(/[（(][^）)]*[）)]$/, '') + '（廃止区間）';
+  }
+  const name = MASTER.lines[lc] ? MASTER.lines[lc].name : String(lc);
+  return name.replace(/[（(][^）)]*[）)]$/, '');
+}
+
+// 立ち寄る駅（区間の境め）では、同じ路線でもまとめずに区切る（折り返しても分かるように）
+function routeLineSummary(route) {
+  const segs = [];
+  for (const l of route.legs) {
+    let first = true;
+    for (const r of l.rides) {
+      if (r.line === 'transfer') continue;   // 同じ駅グループの乗り換えは書かない
+      const name = routeLineBase(r.line);
+      const last = segs[segs.length - 1];
+      if (last && last.name === name && !first) last.to = r.to;
+      else segs.push({ name, from: r.from, to: r.to });
+      first = false;
+    }
+  }
+  if (segs.length === 0) return route.order.map(u => MASTER.units[u].name).join('→');
+  // 前の区切りの終わりと次の始まりが違う駅（乗り換え）なら「A・B」と書く
+  return segs.map((s, i) => {
+    const prevTo = i > 0 ? segs[i - 1].to : null;
+    const head = i === 0 ? MASTER.units[s.from].name
+      : (MASTER.units[prevTo].name === MASTER.units[s.from].name ? '' : '・' + MASTER.units[s.from].name);
+    return head + `→（${s.name}）→` + MASTER.units[s.to].name;
+  }).join('');
 }
 
 // ---------- 4. 乗っている途中で取れる駅 ----------
@@ -468,9 +625,11 @@ function assignPassToLegs(units, legs) {
 
 // 自分で決めた順番（駅の並び）のまま、区間ごとの乗り方を求める。
 // 戻り値: { order, legs, totalKm, guessed: [駅], broken: [区間の番号], passed: [通る駅すべて（順番どおり・重なり無し）] }
-function planFixedRoute(units) {
+//   weight … 道を選ぶときの重み（省くと、いちばん短い道）
+//   along … 乗っている途中で取れる駅も含めた、通る駅すべて（順番どおり・重なり無し）
+function planFixedRoute(units, weight) {
   const g = routeGraph();
-  const { legs, guessed, broken } = routeLegs(g, units);
+  const { legs, guessed, broken } = routeLegs(g, units, weight);
   const passed = [];
   const seen = new Set();
   const addPassed = u => { if (!seen.has(u)) { seen.add(u); passed.push(u); } };
@@ -479,6 +638,13 @@ function planFixedRoute(units) {
     const leg = legs[i];
     if (leg) for (const r of leg.rides) for (const v of r.path) addPassed(v);
   });
+  const along = [];
+  const seenAlong = new Set();
+  units.forEach((u, i) => {
+    if (!seenAlong.has(u)) { seenAlong.add(u); along.push(u); }
+    const leg = legs[i];
+    if (leg && isFinite(leg.km)) for (const v of passAlongRides(leg.rides)) if (!seenAlong.has(v)) { seenAlong.add(v); along.push(v); }
+  });
   return {
     order: units,
     legs,
@@ -486,5 +652,6 @@ function planFixedRoute(units) {
     guessed: [...guessed],
     broken,
     passed,
+    along,
   };
 }

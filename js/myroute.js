@@ -1,30 +1,38 @@
 // ============================================================
 // 自分で作るルート（遠征プランの画面の上の欄）
 //
-// 「境港→米子→鳥取→津山」のように、回りたい駅を順番に入れると、
-// 駅と駅の間で乗る路線・距離・途中で通る未アクセス駅を出し、プランとして保存できる。
-// 駅と駅の間は、線路に沿っていちばん短い道で考える（routeplan.js の planFixedRoute）。
-// 同じ名前の駅がいくつかあるときは、前後の駅に近いほうを選ぶ（選び直せる）。
+// 「江北→佐世保→伊万里→唐津→赤坂」のように、立ち寄る駅を順番に入れると、
+// 駅と駅の間の道の候補（いちばん短い道・未アクセス駅を多く通る道など）を出す（routeplan.js の planRouteCandidates）。
+// 候補は「江北→（JR佐世保線）→佐世保→（松浦鉄道西九州線）→伊万里」のように、路線ごとにまとめて書く。
+// レーダーで取る駅を入れておくと、選んだ候補の道のどこで使えば何駅目で取れるかを出す（routepick.js の planRadarUseFor）。
+// 同じ名前の駅がいくつかあるときは、近い駅を選ぶ（選び直せる）。
+// 選んだ候補は、レーダーの予定も含めてプランとして保存できる。
 // ============================================================
 
-let myRouteTokens = null;    // 読み取った駅: [{ text: 入れた文字, candidates: [駅], chosen: 駅 }]
-let myRouteResult = null;    // 計算したルート（planFixedRoute の戻り値）
-let myRouteNameIndex = null; // 探しやすくした駅名 → [駅メモの駅の番号]
+let myRouteTokens = null;       // 立ち寄る駅: [{ text: 入れた文字, candidates: [駅], chosen: 駅 }]
+let myRouteRadarTokens = [];    // レーダーで取る駅（形は同じ）
+let myRouteRadarN = 10;         // レーダーで取れる駅の数
+let myRouteCands = null;        // ルートの候補: [{ kind, label, route }]
+let myRouteSel = 0;             // 選んでいる候補の番号
+let myRouteNameIndex = null;    // 探しやすくした駅名 → [駅メモの駅の番号]
 
 // ---------- 準備（app.js から呼ばれる） ----------
 
 function initMyRoute() {
   document.getElementById('myRouteDate').value = todayText();   // plans.js
+  document.getElementById('myRouteRadarN').value = myRouteRadarN;
   document.getElementById('myRouteCheck').addEventListener('click', checkMyRoute);
   document.getElementById('myRouteSave').addEventListener('click', saveMyRoute);
-  // 駅の順番を書き換えたら、もう一度「確かめる」まで保存できないようにする
-  document.getElementById('myRouteStations').addEventListener('input', () => {
-    myRouteTokens = null;
-    myRouteResult = null;
-    document.getElementById('myRouteResult').replaceChildren();
-    document.getElementById('myRouteSave').disabled = true;
-    setMyRouteMessage('', '');
-  });
+  // 駅を書き換えたら、もう一度「候補を出す」まで保存できないようにする
+  for (const id of ['myRouteStations', 'myRouteRadar', 'myRouteRadarN']) {
+    document.getElementById(id).addEventListener('input', () => {
+      myRouteTokens = null;
+      myRouteCands = null;
+      document.getElementById('myRouteResult').replaceChildren();
+      document.getElementById('myRouteSave').disabled = true;
+      setMyRouteMessage('', '');
+    });
+  }
 }
 
 function setMyRouteMessage(text, kind) {
@@ -119,55 +127,114 @@ function candidateLabel(u) {
   return `${unit.name}（${prefName(unit.pref)}・${lineText}）${unit.closed ? '（廃駅）' : ''}`;
 }
 
-// ---------- 確かめる ----------
+// ---------- ルートの候補を出す ----------
 
-function checkMyRoute() {
-  const text = document.getElementById('myRouteStations').value;
+// 入れた駅名を読み取る。戻り値: { tokens: [{ text, candidates, chosen }], notFound: ['「…」'] }
+function readStationTokens(text) {
   const names = splitRouteText(text);
-  document.getElementById('myRouteSave').disabled = true;
-  if (names.length < 2) {
-    myRouteTokens = null;
-    document.getElementById('myRouteResult').replaceChildren();
-    setMyRouteMessage('駅を2つ以上、「→」でつないで入れてください（例: 境港→米子→鳥取→津山）。', 'error');
-    return;
-  }
   const tokens = names.map(n => {
     const candidates = findStationsByName(n);
     return { text: n, candidates, chosen: candidates.length === 1 ? candidates[0] : null };
   });
-  const notFound = tokens.filter(t => t.candidates.length === 0).map(t => `「${t.text}」`);
-  if (notFound.length) {
+  return { tokens, notFound: tokens.filter(t => t.candidates.length === 0).map(t => `「${t.text}」`) };
+}
+
+function checkMyRoute() {
+  const resultBox = document.getElementById('myRouteResult');
+  document.getElementById('myRouteSave').disabled = true;
+  myRouteCands = null;
+  const st = readStationTokens(document.getElementById('myRouteStations').value);
+  if (st.tokens.length < 2) {
     myRouteTokens = null;
-    document.getElementById('myRouteResult').replaceChildren();
-    setMyRouteMessage(`${notFound.join('、')} という駅が見つかりません。駅名を確かめてください（駅メモでの名前で入れます）。`, 'error');
+    resultBox.replaceChildren();
+    setMyRouteMessage('立ち寄る駅を2つ以上、「→」でつないで入れてください（例: 江北→佐世保→伊万里→唐津→赤坂）。', 'error');
     return;
   }
-  chooseNearest(tokens);
-  myRouteTokens = tokens;
+  if (st.notFound.length) {
+    myRouteTokens = null;
+    resultBox.replaceChildren();
+    setMyRouteMessage(`${st.notFound.join('、')} という駅が見つかりません。駅名を確かめてください（駅メモでの名前で入れます）。`, 'error');
+    return;
+  }
+  // レーダーで取る駅（なくてもよい）
+  const rd = readStationTokens(document.getElementById('myRouteRadar').value);
+  if (rd.notFound.length) {
+    myRouteTokens = null;
+    resultBox.replaceChildren();
+    setMyRouteMessage(`レーダーで取る駅の ${rd.notFound.join('、')} が見つかりません。駅名を確かめてください。`, 'error');
+    return;
+  }
+  chooseNearest(st.tokens);
+  myRouteTokens = st.tokens;
+  myRouteRadarTokens = rd.tokens;
+  myRouteRadarN = clampInt(document.getElementById('myRouteRadarN').value, 1, 50, 10);   // radar.js
+  document.getElementById('myRouteRadarN').value = myRouteRadarN;
   calcMyRoute();
 }
 
-// 選んだ駅で、区間ごとの乗り方を計算して表示する
-function calcMyRoute() {
-  // 同じ駅が続いたら1つにする
+// 立ち寄る駅（続けて同じ駅は1つにする）
+function myRouteUnits() {
   const units = [];
   for (const t of myRouteTokens) if (units[units.length - 1] !== t.chosen) units.push(t.chosen);
+  return units;
+}
+
+// 選んだ駅で、ルートの候補を計算して表示する
+function calcMyRoute() {
+  const units = myRouteUnits();
   if (units.length < 2) {
-    myRouteResult = null;
+    myRouteCands = null;
     renderMyRoute();
     setMyRouteMessage('ちがう駅を2つ以上入れてください。', 'error');
     return;
   }
-  myRouteResult = planFixedRoute(units);   // routeplan.js
-  renderMyRoute();
-  const broken = myRouteResult.broken.map(i => `${MASTER.units[units[i]].name}→${MASTER.units[units[i + 1]].name}`);
-  if (broken.length) {
+  const accessed = appState.resolved ? appState.resolved.accessed : new Set();
+  const res = planRouteCandidates(units, accessed);   // routeplan.js
+  if (res.broken) {
+    myRouteCands = null;
+    renderMyRoute();
+    const broken = res.broken.broken.map(i => `${MASTER.units[units[i]].name}→${MASTER.units[units[i + 1]].name}`);
     setMyRouteMessage(`${broken.join('、')} は線路がつながっていないため、ルートにできません。`, 'error');
     document.getElementById('myRouteSave').disabled = true;
     return;
   }
-  setMyRouteMessage('ルートを考えました。中身を確かめてから「プランとして保存」を押してください。', 'good');
+  myRouteCands = res.candidates;
+  myRouteSel = 0;
+  chooseRadarNearest(units);
+  renderMyRoute();
+  setMyRouteMessage(`ルートの候補を ${myRouteCands.length} 本出しました。使う候補を選んでから「プランとして保存」を押してください。`, 'good');
   document.getElementById('myRouteSave').disabled = false;
+}
+
+// レーダーで取る駅に同じ名前の駅がいくつかあるときは、立ち寄る駅にいちばん近い駅を選ぶ
+function chooseRadarNearest(units) {
+  for (const t of myRouteRadarTokens) {
+    if (t.chosen || t.candidates.length === 0) continue;
+    let best = t.candidates[0], bestD = Infinity;
+    for (const c of t.candidates) {
+      for (const u of units) {
+        const d = routeDistKm(MASTER.units[c], MASTER.units[u]);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+    }
+    t.chosen = best;
+  }
+}
+
+// いま選んでいる候補
+function myRouteSelected() {
+  return myRouteCands && myRouteCands[myRouteSel] ? myRouteCands[myRouteSel] : null;
+}
+
+// 選んでいる候補でのレーダーの予定（routepick.js の planRadarUseFor）
+// その道を通る駅や、乗っている途中で取れる駅は、レーダーがいらないので passing に分ける
+function myRouteRadarPlan(route) {
+  const all = [...new Set(myRouteRadarTokens.map(t => t.chosen).filter(Boolean))];
+  const along = new Set(route.along);
+  const passing = all.filter(u => along.has(u));
+  const targets = all.filter(u => !along.has(u));
+  if (!targets.length) return { ok: [], ng: [], passing };
+  return { ...planRadarUseFor(targets, route.order, route.legs, myRouteRadarN, null), passing };
 }
 
 function renderMyRoute() {
@@ -175,63 +242,112 @@ function renderMyRoute() {
   box.replaceChildren();
   if (!myRouteTokens) return;
   const accessed = appState.resolved ? appState.resolved.accessed : new Set();
-  const route = myRouteResult;
 
-  if (route) {
-    const todo = route.passed.filter(u => !accessed.has(u));
-    box.append(el('p', 'detail-count', `約 ${Math.round(route.totalKm)} km・通る駅 ${route.passed.length} 駅（うち未アクセス ${todo.length} 駅）`));
-    if (route.guessed.length) {
-      box.append(el('p', 'notice', '線路のデータが無い区間や廃止区間は、駅と駅を直線で結んで考えています（「推定」と書いた区間）。'));
-    }
-  }
-
-  // 駅の並び。同じ名前の駅がいくつかあるときは、選び直せる
-  const list = el('ol', 'route-list');
-  let legIndex = 0;
-  myRouteTokens.forEach((t, i) => {
-    if (i > 0 && myRouteTokens[i - 1].chosen === t.chosen) return;   // 続けて同じ駅は1つにまとめた
-    const li = el('li', 'route-stop' + (accessed.has(t.chosen) ? ' plan-done' : ''));
-    const head = el('div', 'route-stop-head');
-    head.append(el('span', 'route-num', legIndex === 0 ? '出発' : String(legIndex)));
-    if (t.candidates.length > 1) {
+  // 同じ名前の駅がいくつかあるときに、選び直す欄
+  const ambiguous = [...myRouteTokens.map(t => ({ t, kind: 'stop' })), ...myRouteRadarTokens.map(t => ({ t, kind: 'radar' }))]
+    .filter(x => x.t.candidates.length > 1);
+  if (ambiguous.length) {
+    const amb = el('div', 'myroute-amb');
+    amb.append(el('p', 'help', '同じ名前の駅がいくつかあるので、近い駅を選んでいます。違うときは選び直してください。'));
+    for (const { t, kind } of ambiguous) {
       const sel = el('select', 'myroute-choice');
       sel.setAttribute('aria-label', `「${t.text}」の駅を選ぶ`);
       for (const c of t.candidates) {
-        const op = el('option', '', candidateLabel(c));
+        const op = el('option', '', (kind === 'radar' ? 'レーダー：' : '') + candidateLabel(c));
         op.value = c;
         sel.append(op);
       }
       sel.value = t.chosen;
-      sel.addEventListener('change', () => { t.chosen = sel.value; calcMyRoute(); });
-      head.append(sel);
-    } else {
-      head.append(el('span', 'route-name', MASTER.units[t.chosen].name), el('small', 'muted', `（${prefName(MASTER.units[t.chosen].pref)}）`));
+      sel.addEventListener('change', () => { t.chosen = sel.value; if (kind === 'stop') calcMyRoute(); else renderMyRoute(); });
+      amb.append(sel);
     }
-    if (accessed.has(t.chosen)) head.append(el('span', 'plan-check', '✓ アクセス済み'));
-    li.append(head);
+    box.append(amb);
+  }
+  if (!myRouteCands) return;
 
-    const leg = route && legIndex > 0 ? route.legs[legIndex - 1] : null;
-    if (leg) {
-      const rides = el('div', 'route-rides');
-      if (!isFinite(leg.km)) {
-        rides.append(el('div', 'route-ride guess', '線路がつながっていません'));
-      } else {
-        rides.append(el('span', 'route-km', `約 ${Math.round(leg.km * 10) / 10} km`));
-        for (const r of leg.rides) {
-          const guess = r.line === 'guess' || String(r.line).startsWith('closed:');
-          rides.append(el('div', 'route-ride' + (guess ? ' guess' : ''), r.line === 'transfer'
-            ? `乗り換え（${MASTER.units[r.from].name}→${MASTER.units[r.to].name}）`
-            : `${lineName(r.line)}：${MASTER.units[r.from].name}→${MASTER.units[r.to].name}`));   // route.js
-        }
-        const via = [...new Set(leg.rides.flatMap(r => r.path))].filter(u => u !== leg.from && u !== leg.to && !accessed.has(u));
-        if (via.length) rides.append(el('div', 'plan-via', `途中の未アクセス駅 ${via.length}：` + via.map(u => MASTER.units[u].name).join('、')));
-      }
-      li.append(rides);
-    }
-    list.append(li);
-    legIndex++;
+  // 候補の一覧（押すと選べる）
+  const list = el('div', 'myroute-cands');
+  myRouteCands.forEach((c, i) => {
+    const b = el('button', 'myroute-cand' + (i === myRouteSel ? ' selected' : ''));
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(i === myRouteSel));
+    const todo = c.route.along.filter(u => !accessed.has(u)).length;
+    b.append(
+      el('span', 'myroute-cand-label', `${i + 1}. ${c.label}`),
+      el('span', 'myroute-cand-sum', routeLineSummary(c.route)),   // routeplan.js
+      el('span', 'myroute-cand-nums', `約 ${Math.round(c.route.totalKm)} km・通る未アクセス駅 ${todo} 駅（乗っている途中で取れる駅を含む）`),
+    );
+    b.addEventListener('click', () => { myRouteSel = i; renderMyRoute(); });
+    list.append(b);
   });
   box.append(list);
+
+  const cand = myRouteSelected();
+  const route = cand.route;
+  const radar = myRouteRadarPlan(route);
+  if (route.guessed.length) {
+    box.append(el('p', 'notice', '線路のデータが無い区間や廃止区間は、駅と駅を直線で結んで考えています（「推定」と書いた区間）。'));
+  }
+
+  // レーダーの予定（経路の順番どおり、使う場所ごと）
+  if (radar.ok.length || radar.ng.length || radar.passing.length) {
+    const rbox = el('div', 'myroute-radar');
+    rbox.append(el('h4', 'role-radar-text', `レーダーの予定（レーダー ${myRouteRadarN} 駅）`));
+    const groups = [];
+    for (const r of radar.ok) {
+      const last = groups[groups.length - 1];
+      if (last && last.near === r.near) last.items.push(r);
+      else groups.push({ near: r.near, items: [r] });
+    }
+    for (const gr of groups) {
+      const line = el('div', 'route-extra route-extra-radar');
+      line.append(el('b', '', `${MASTER.units[gr.near].name}から：`));
+      gr.items.sort((a, b) => a.rank - b.rank).forEach((r, k) => {
+        if (k > 0) line.append('、');
+        const done = accessed.has(r.u);
+        line.append(el('span', done ? 'route-extra-done' : '', MASTER.units[r.u].name + (done ? '✓' : '')), el('small', 'muted', `（${r.rank}駅目）`));
+      });
+      rbox.append(line);
+    }
+    if (radar.passing.length) {
+      rbox.append(el('p', 'help', `この道を通るか、乗っている途中で取れるので、レーダーはいりません：${radar.passing.map(u => MASTER.units[u].name).join('、')}`));
+    }
+    if (radar.ng.length) {
+      rbox.append(el('p', 'notice', `レーダー ${myRouteRadarN} 駅では、この道のどこからも届きません：${radar.ng.map(r => MASTER.units[r.u].name).join('、')}。駅数を増やすか、別の候補や立ち寄る駅を変えてください。`));
+    }
+    box.append(rbox);
+  }
+
+  // 選んだ候補の中身（区間ごとの乗り方）
+  const stops = el('ol', 'route-list');
+  route.order.forEach((u, i) => {
+    const li = el('li', 'route-stop' + (accessed.has(u) ? ' plan-done' : ''));
+    const head = el('div', 'route-stop-head');
+    head.append(el('span', 'route-num', i === 0 ? '出発' : i === route.order.length - 1 ? '到着' : String(i)));
+    head.append(el('span', 'route-name', MASTER.units[u].name), el('small', 'muted', `（${prefName(MASTER.units[u].pref)}）`));
+    if (accessed.has(u)) head.append(el('span', 'plan-check', '✓ アクセス済み'));
+    li.append(head);
+    const leg = i > 0 ? route.legs[i - 1] : null;
+    if (leg) {
+      const rides = el('div', 'route-rides');
+      rides.append(el('span', 'route-km', `約 ${Math.round(leg.km * 10) / 10} km`));
+      for (const r of leg.rides) {
+        const guess = r.line === 'guess' || String(r.line).startsWith('closed:');
+        rides.append(el('div', 'route-ride' + (guess ? ' guess' : ''), r.line === 'transfer'
+          ? `乗り換え（${MASTER.units[r.from].name}→${MASTER.units[r.to].name}）`
+          : `${lineName(r.line)}：${MASTER.units[r.from].name}→${MASTER.units[r.to].name}`));   // route.js
+      }
+      const via = passAlongRides(leg.rides).filter(v => v !== leg.from && v !== leg.to && !accessed.has(v));
+      if (via.length) rides.append(el('div', 'plan-via', `途中の未アクセス駅 ${via.length}：` + via.map(v => MASTER.units[v].name).join('、')));
+      const legRadar = radar.ok.filter(r => !r.stop && r.leg === i - 1);
+      if (legRadar.length) radarExtraLines(legRadar, accessed, v => MASTER.units[v].name, false).forEach(x => rides.append(x));   // route.js
+      li.append(rides);
+    }
+    const here = radar.ok.filter(r => r.stop === u);
+    if (here.length) radarExtraLines(here, accessed, v => MASTER.units[v].name, true).forEach(x => li.append(x));
+    stops.append(li);
+  });
+  box.append(stops);
 }
 
 // ---------- 保存 ----------
@@ -239,25 +355,33 @@ function renderMyRoute() {
 async function saveMyRoute() {
   const btn = document.getElementById('myRouteSave');
   const msg = document.getElementById('myRouteSaveMessage');
-  if (!myRouteResult || myRouteResult.broken.length) return;
+  const cand = myRouteSelected();
+  if (!cand) return;
+  const route = cand.route;
   const dateInput = document.getElementById('myRouteDate');
   if (!dateInput.value) { msg.textContent = '日付を入れてください。'; msg.className = 'message error'; return; }
   const nameInput = document.getElementById('myRouteName');
-  const stops = myRouteResult.order.map(u => MASTER.units[u].name);
-  // ルート名が空なら「境港→津山」のように、はしの駅で名前を付ける
+  const stops = route.order.map(u => MASTER.units[u].name);
+  // ルート名が空なら「江北→赤坂」のように、はしの駅で名前を付ける
   const name = nameInput.value.trim() || `${stops[0]}→${stops[stops.length - 1]}`;
   const noteInput = document.getElementById('myRouteNote');
   btn.disabled = true;
   try {
-    const id = await addPlanFromMyRoute(name, dateInput.value, myRouteResult, noteInput.value.trim());   // plans.js
+    const radar = myRouteRadarPlan(route);
+    const id = await addPlanFromMyRoute(name, dateInput.value, route, noteInput.value.trim(), {   // plans.js
+      summary: routeLineSummary(route),
+      radar: radar.ok,
+      radarN: myRouteRadarN,
+    });
     msg.replaceChildren(document.createTextNode(`「${name}」を保存しました。下の一覧に並んでいます。`));
     msg.className = 'message good';
     // 欄を空にして、次のルートを入れられるようにする
     nameInput.value = '';
     noteInput.value = '';
     document.getElementById('myRouteStations').value = '';
+    document.getElementById('myRouteRadar').value = '';
     myRouteTokens = null;
-    myRouteResult = null;
+    myRouteCands = null;
     document.getElementById('myRouteResult').replaceChildren();
     setMyRouteMessage('', '');
     selectPlan(id);   // plans.js（保存したプランを開いて見せる）

@@ -366,7 +366,7 @@ function radarExtraLines(items, accessed, nameOf, atStop) {
   for (const [near, list] of groups) {
     list.sort((a, b) => a.rank - b.rank);
     const line = el('div', 'route-extra route-extra-radar');
-    line.append(el('b', '', `レーダー（${atStop ? 'ここ' : nameOf(near) + ' 付近'}で使う・${list[list.length - 1].rank} 駅分）：`));
+    line.append(el('b', '', `レーダー（${nameOf(near)}${atStop ? '' : ' 付近'}で使う・${list[list.length - 1].rank} 駅分）：`));
     list.forEach((r, k) => {
       if (k > 0) line.append('、');
       const done = accessed.has(r.u);

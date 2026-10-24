@@ -120,8 +120,11 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets, ex
 
 // 自分で決めた順番のルート（routeplan.js の planFixedRoute の戻り値）から、プランを作って保存する
 // 回る対象は、通る駅のうち、いま未アクセスの駅（途中の駅も含む）
-async function addPlanFromMyRoute(name, date, route, note) {
+//   extras … { summary: 路線ごとにまとめた書き方, radar: レーダーの予定（planRadarUseFor の ok）, radarN }（省略可）
+async function addPlanFromMyRoute(name, date, route, note, extras) {
   const accessed = appState.resolved ? appState.resolved.accessed : new Set();
+  const radar = extras && extras.radar ? extras.radar : [];
+  const along = route.along || route.passed;   // 乗っている途中で取れる駅も含めた、通る駅
   const plan = {
     id: newPlanId(),
     kind: 'manual',   // 自分で作ったルート
@@ -132,13 +135,19 @@ async function addPlanFromMyRoute(name, date, route, note) {
     round: false,
     start: route.order[0],
     stops: route.order.map(u => ({ u, name: MASTER.units[u].name, pref: MASTER.units[u].pref })),
-    targets: route.passed.filter(u => !accessed.has(u)),
+    // 回る対象：通る駅（乗っている途中で取れる駅も含む）と、レーダーで取る駅のうち、いま未アクセスの駅
+    targets: [...new Set([...along, ...radar.map(r => r.u)])].filter(u => !accessed.has(u)),
     legs: route.legs.map(l => ({
       km: Math.round(l.km * 10) / 10,
       rides: l.rides.map(r => ({ line: lineName(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
-      // 途中で通る駅（区間の両はしの駅は除く）
-      via: [...new Set(l.rides.flatMap(r => r.path))].filter(u => u !== l.from && u !== l.to),
+      // 途中で通る駅・乗っている途中で取れる駅（区間の両はしの駅は除く）
+      via: passAlongRides(l.rides).filter(u => u !== l.from && u !== l.to),   // routeplan.js
     })),
+    // 路線ごとにまとめた書き方（例: 江北→（JR佐世保線）→佐世保→…）
+    summary: extras && extras.summary ? extras.summary : '',
+    // レーダーの予定（stop … 使うチェックイン駅、leg … 乗っている途中で使う区間、near … 使う場所でいちばん近い駅、rank … 何駅目か）
+    radar: radar.map(r => ({ u: r.u, stop: r.stop, leg: r.leg, near: r.near, rank: r.rank })),
+    radarN: extras && extras.radarN ? extras.radarN : null,
     totalKm: Math.round(route.totalKm),
     note: note || '',
     result: null,
@@ -275,6 +284,9 @@ function planCard(plan) {
     ? `立ち寄り ${plan.stops.length} 駅・約 ${plan.totalKm} km・通る未アクセス駅 ${units.length} のうち ${done} 駅アクセス済み`
     : `${units.length} 駅・約 ${plan.totalKm} km・アクセス済み ${done}/${units.length}`));
   card.append(summary);
+
+  // 路線ごとにまとめた書き方（自分で作ったルート）
+  if (plan.summary) card.append(el('p', 'plan-line-summary', plan.summary));
 
   // 結果
   if (plan.result) {

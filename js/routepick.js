@@ -209,18 +209,20 @@ function rvUnitSet() {
 // レーダーで取る駅ごとに、経路の上（チェックイン駅と、乗っている途中の地点）で
 // その駅が近い順の何番目になるかを調べ、いちばん小さい番号になる場所で使う。
 
-// レーダーを使える場所の一覧：チェックイン駅と、区間の道すじの上に 0.3km おきに置いた点
-//   戻り値: [{ lat, lon, stop: チェックイン駅 or null, leg: 区間の番号 or null }]
+// レーダーを使える場所の一覧：チェックイン駅と、区間の道すじの上に 0.3km おきに置いた点（経路の順番どおり）
+//   戻り値: [{ lat, lon, stop: チェックイン駅 or null, leg: 区間の番号 or null, seq: 経路の中の順番 }]
 function radarUsePoints(order, legs) {
   const pts = [];
   const seen = new Set();
-  for (const u of order) {
-    if (seen.has(u)) continue;
+  const addStop = u => {
+    if (seen.has(u)) return;
     seen.add(u);
-    pts.push({ lat: MASTER.units[u].lat, lon: MASTER.units[u].lon, stop: u, leg: null });
-  }
-  (legs || []).forEach((l, i) => {
-    if (!isFinite(l.km)) return;
+    pts.push({ lat: MASTER.units[u].lat, lon: MASTER.units[u].lon, stop: u, leg: null, seq: pts.length });
+  };
+  order.forEach((u, i) => {
+    addStop(u);
+    const l = (legs || [])[i];
+    if (!l || !isFinite(l.km)) return;
     for (const r of l.rides) {
       if (r.line === 'guess') continue;   // 推定のつなぎは、実際には乗れない
       for (let k = 0; k + 1 < r.path.length; k++) {
@@ -228,7 +230,7 @@ function radarUsePoints(order, legs) {
         const steps = Math.max(1, Math.ceil(routeDistKm(a, b) / PASS_STEP_KM));   // routeplan.js
         for (let s = 0; s <= steps; s++) {
           const t = s / steps;
-          pts.push({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, stop: null, leg: i });
+          pts.push({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, stop: null, leg: i, seq: pts.length });
         }
       }
     }
@@ -243,15 +245,20 @@ function radarRankAt(p, u, n) {
   return i < 0 ? 0 : i + 1;
 }
 
-// レーダーで取る駅を、どこで使うか決める
-//   戻り値: { ok: [{ u, rank, stop, leg, near: その場所でいちばん近い駅, lat, lon }], ng: [{ u, from }] }
+// レーダーで取る駅を、どこで使うか決める（巡回ルートの選んだ駅で）
 function planRadarUse(order, legs) {
-  const n = routeSettings.radarN;
+  return planRadarUseFor(radarTargets(), order, legs, routeSettings.radarN, routeSettings.radar);
+}
+
+// レーダーで取る駅を、どこで使うか決める
+//   targets … レーダーで取る駅、n … レーダーで取れる駅の数、chosen … Map(駅 → 使うチェックイン駅。'' なら自動)
+//   戻り値: { ok: [{ u, rank, stop, leg, near: その場所でいちばん近い駅, lat, lon, seq }]（経路の順番どおり）, ng: [{ u, from }] }
+function planRadarUseFor(targets, order, legs, n, chosenMap) {
   const pts = radarUsePoints(order, legs);
   const ok = [], ng = [];
-  for (const u of radarTargets()) {
+  for (const u of targets) {
     const unit = MASTER.units[u];
-    const chosen = routeSettings.radar.get(u);
+    const chosen = chosenMap ? chosenMap.get(u) : '';
     // 使う場所の候補：選んだチェックイン駅があれば、その駅だけ。無ければ経路の上すべて
     const cands = chosen && order.includes(chosen)
       ? pts.filter(p => p.stop === chosen)
@@ -260,13 +267,15 @@ function planRadarUse(order, legs) {
     for (const p of cands) {
       const rank = radarRankAt(p, u, n);
       if (!rank) continue;
-      // 番号が小さい場所を選ぶ。同じなら、チェックイン駅を先にする
-      if (!best || rank < best.rank || (rank === best.rank && p.stop && !best.p.stop)) best = { p, rank };
+      // 番号が小さい場所を選ぶ。同じなら、その駅に近い場所（同じくらいなら、チェックイン駅）を先にする
+      const d = routeDistKm(p, unit);
+      if (!best || rank < best.rank || (rank === best.rank && (d < best.d - 0.2 || (Math.abs(d - best.d) <= 0.2 && p.stop && !best.p.stop)))) best = { p, rank, d };
     }
     if (!best) { ng.push({ u, from: chosen && order.includes(chosen) ? chosen : null }); continue; }
     const p = best.p;
-    ok.push({ u, rank: best.rank, stop: p.stop, leg: p.leg, near: p.stop || radarNearest(p.lat, p.lon, 1)[0].u, lat: p.lat, lon: p.lon });
+    ok.push({ u, rank: best.rank, stop: p.stop, leg: p.leg, near: p.stop || radarNearest(p.lat, p.lon, 1)[0].u, lat: p.lat, lon: p.lon, seq: p.seq });
   }
+  ok.sort((a, b) => a.seq - b.seq);
   return { ok, ng };
 }
 

@@ -410,6 +410,19 @@ select {
 .route-extra-rv { border-color: var(--rv); }
 .route-extra-rv b { color: var(--rv); }
 .pick-line-done { color: var(--muted); }
+
+/* 自分で作るルート：候補とレーダーの予定 */
+.myroute textarea { margin-top: 2px; }
+.myroute-amb { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.myroute-cands { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.myroute-cand { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px; border: 2px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+.myroute-cand.selected { border-color: var(--accent); background: var(--code-bg); }
+.myroute-cand-label { font-weight: bold; color: var(--accent); }
+.myroute-cand-sum { font-size: 14px; overflow-wrap: anywhere; }
+.myroute-cand-nums { font-size: 12px; color: var(--muted); }
+.myroute-radar { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--code-bg); }
+.myroute-radar h4 { margin: 0 0 4px; }
+.plan-line-summary { font-size: 14px; font-weight: bold; overflow-wrap: anywhere; margin: 8px 0; }
 .route-radar-n { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; margin-top: 6px; }
 .route-radar-n input { width: 5em; font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
 .route-extra-pass { border-color: var(--pass); }

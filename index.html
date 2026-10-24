@@ -278,7 +278,7 @@
     <!-- 自分でルートを作る（myroute.js） -->
     <details class="panel myroute" id="myRouteBox">
       <summary>自分でルートを作る</summary>
-      <p class="help">回りたい駅を「→」でつないで入れてください（例: 境港→米子→鳥取→津山）。「、」や改行で区切っても構いません。駅と駅の間は、線路に沿っていちばん短い道で考えます。通りたい路線があるときは、途中の駅も入れてください。ルート名が空のときは「境港→津山」のように名前を付けます。</p>
+      <p class="help">立ち寄る駅を「→」でつないで入れてください（例: 江北→佐世保→伊万里→唐津→赤坂）。「、」や改行で区切っても構いません。駅と駅の間の道は、いちばん短い道・未アクセス駅を多く通る道などの候補を出すので、使う候補を選んでください。通りたい路線があるときは、途中の駅も入れてください。ルート名が空のときは「江北→赤坂」のように名前を付けます。</p>
       <div class="myroute-form">
         <label class="select-label">ルート名
           <input type="text" id="myRouteName" maxlength="60" placeholder="例: 山陰・美作めぐり">
@@ -286,11 +286,18 @@
         <label class="select-label">日付
           <input type="date" id="myRouteDate">
         </label>
-        <label class="select-label">駅の順番
-          <textarea id="myRouteStations" rows="2" placeholder="境港→米子→鳥取→津山"></textarea>
+        <label class="select-label">立ち寄る駅（順番どおり）
+          <textarea id="myRouteStations" rows="2" placeholder="江北→佐世保→伊万里→唐津→赤坂"></textarea>
+        </label>
+        <label class="select-label">レーダーで取る駅（なくても構いません）
+          <textarea id="myRouteRadar" rows="2" placeholder="西唐津、相知、岩屋、金武、夫婦石、ハウステンボス"></textarea>
         </label>
       </div>
-      <div class="buttons"><button type="button" id="myRouteCheck">ルートを確かめる</button></div>
+      <label class="route-radar-n">レーダーで取れる駅の数
+        <input type="number" id="myRouteRadarN" min="1" max="50" inputmode="numeric">
+        駅（いる場所から近い順）</label>
+      <p class="help">レーダーで取る駅は、選んだ候補の道の上で、近い順の番号がいちばん小さくなる場所（チェックインする駅か、乗っている途中）を探して「唐津から：西唐津（3駅目）」のように並べます。</p>
+      <div class="buttons"><button type="button" id="myRouteCheck" class="primary">ルートの候補を出す</button></div>
       <p id="myRouteMessage" class="message"></p>
       <div id="myRouteResult"></div>
       <label class="memo-label">
