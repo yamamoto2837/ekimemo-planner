@@ -422,6 +422,22 @@ select {
 .myroute-cand-nums { font-size: 12px; color: var(--muted); }
 .myroute-radar { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--code-bg); }
 .myroute-radar h4 { margin: 0 0 4px; }
+/* このルートで埋まる駅（gain.js） */
+.gain { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--code-bg); font-size: 14px; }
+.gain-title { margin: 0 0 4px; color: var(--todo); }
+.gain-total { margin: 0 0 4px; font-weight: bold; }
+.gain-prefs { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-bottom: 6px; }
+.gain-lines-head { margin: 6px 0 2px; font-weight: bold; }
+.gain-lines { list-style: none; margin: 0; padding: 0; }
+.gain-line { padding: 2px 0; border-top: 1px dashed var(--border); }
+.gain-line summary { cursor: pointer; }
+.gain-line-name { color: var(--accent); font-weight: bold; }
+.gain-line.complete .gain-line-name { color: var(--good); }
+.gain-complete { background: var(--good); color: #ffffff; }
+.gain-line-stations { margin: 2px 0 4px 1em; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.gain-more { margin-top: 4px; }
+.gain-more > summary { cursor: pointer; color: var(--accent); }
+.plan-map { margin: 8px 0; }
 .plan-edit { margin: 8px 0; font-size: 14px; }
 .plan-edit > summary { cursor: pointer; color: var(--accent); }
 .plan-edit .filter-row { margin-top: 6px; }

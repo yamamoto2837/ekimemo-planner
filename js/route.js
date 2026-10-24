@@ -260,6 +260,16 @@ function renderRouteResult(plan, startUnit, targetSet) {
   }
   box.append(head);
 
+  // このルートで埋まる駅（gain.js）：立ち寄る駅・途中で取る駅・レーダー・ルートビューン
+  const gainUnits = [
+    ...plan.order, ...dropped, ...extras.targets,
+    ...plan.legs.flatMap(l => l.pass || []),
+    ...[...extras.passAt.values()].flat().map(p => p.u),
+  ];
+  const gainPanel = el('div', 'panel');
+  gainPanel.append(gainView(gainUnits));
+  box.append(gainPanel);
+
   // プランとして保存（plans.js）
   const save = el('div', 'panel plan-save');
   save.append(el('h4', '', 'プランとして保存'));

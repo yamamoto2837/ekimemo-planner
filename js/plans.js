@@ -2,7 +2,8 @@
 // 遠征プランの保存（F8）
 //
 // 巡回ルートで出した順番を「プラン」として、日付つきで保存する。
-// 遠征のあとは、各駅がアクセス済みになったかを見て、結果を記録できる。
+// プランごとに、決行すると何が埋まるか（全体・都道府県・路線ごと）と地図を見せる（gain.js）。
+// （前は「結果を記録する」があった。前に記録した結果は、そのまま表示する）
 //
 // 保存はブラウザの中（IndexedDB の 'plans'）。共有（sync.js）でほかのデバイスともそろえる。
 // メモと同じく、1件ごとに更新日時を持ち、消したプランも「消した」という印を残す。
@@ -105,6 +106,7 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets, ex
     legs: route.legs.map((l, i) => ({
       km: Math.round(l.km * 10) / 10,
       rides: l.rides.map(r => ({ line: lineLabel(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
+      path: legPath(l),   // 道すじ（地図に描く）
       // 途中で取れる駅（選んだ駅か、保存したときに未アクセスの駅だけ）
       pass: (l.pass || []).filter(u => targets.has(u) || !accessedNow.has(u)),
       // 自分で「途中で取る」にした駅
@@ -143,6 +145,7 @@ async function addPlanFromMyRoute(name, date, route, note, extras) {
     legs: route.legs.map(l => ({
       km: Math.round(l.km * 10) / 10,
       rides: l.rides.map(r => ({ line: lineName(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
+      path: legPath(l),   // 道すじ（地図に描く）
       // 途中で通る駅・乗っている途中で取れる駅（区間の両はしの駅は除く）
       via: passAlongRides(l.rides).filter(u => u !== l.from && u !== l.to),   // routeplan.js
     })),
@@ -173,20 +176,39 @@ async function deletePlan(id) {
   renderPlans();
 }
 
-// 結果を記録する：今アクセス済みの駅を「回れた駅」とする
-async function recordPlanResult(id) {
-  const plan = planData.plans[id];
-  if (!plan || !appState.resolved) return;
-  const accessed = appState.resolved.accessed;
-  const units = planTargets(plan);
-  plan.result = {
-    recordedAt: new Date().toISOString(),
-    visited: units.filter(u => accessed.has(u)),
-    missed: units.filter(u => !accessed.has(u)),
-  };
-  touchPlan(plan);
-  await storePlans();
-  renderPlans();
+// 区間の道すじ（通る駅の並び）
+function legPath(leg) {
+  const out = [];
+  for (const r of leg.rides) for (const u of r.path) if (out[out.length - 1] !== u) out.push(u);
+  return out;
+}
+
+// このプランで取れる駅すべて（回る対象・途中で取る駅・レーダー・ルートビューン）
+function planGainUnits(plan) {
+  const set = new Set(planTargets(plan));
+  for (const l of plan.legs || []) for (const key of ['pass', 'via', 'mine']) for (const u of l[key] || []) set.add(u);
+  for (const r of plan.radar || []) set.add(r.u);
+  for (const p of plan.rv || []) for (const u of p.units || []) set.add(u);
+  return [...set];
+}
+
+// 地図に描く道すじ（保存した道すじが無い前のプランは、立ち寄る駅を直線で結ぶ）
+function planPaths(plan) {
+  const legs = plan.legs || [];
+  if (legs.length && legs.every(l => l.path && l.path.length)) return legs.map(l => l.path);
+  return [plan.stops.map(s => s.u)];
+}
+
+// 開いたプランの地図（プランの番号 → Leaflet の地図）
+const planMaps = new Map();
+
+function removePlanMaps() {
+  for (const m of planMaps.values()) {
+    // 描きかけの処理が残っていると、消したあとにエラーになるので、先に止める
+    m.eachLayer(l => { if (l._redrawRequest) { L.Util.cancelAnimFrame(l._redrawRequest); l._redrawRequest = null; } });
+    m.remove();
+  }
+  planMaps.clear();
 }
 
 // 回る対象の駅（古い形のプランなら、並びの駅すべて）
@@ -257,6 +279,7 @@ function activePlans() {
 function renderPlans() {
   const box = document.getElementById('planList');
   if (!box) return;
+  removePlanMaps();
   box.replaceChildren();
   const plans = activePlans();
   if (plans.length === 0) {
@@ -315,20 +338,29 @@ function planCard(plan) {
     card.append(res);
   }
 
+  // このプランで埋まる駅（gain.js）と地図（開いたときに描く）
+  card.append(gainView(planGainUnits(plan)));
+  const mapDiv = el('div', 'route-map plan-map');
+  card.append(mapDiv);
+  const drawMap = () => {
+    if (planMaps.has(plan.id) || !card.open) return;
+    const accessedNow = appState.resolved ? appState.resolved.accessed : new Set();
+    const gained = planGainUnits(plan).filter(u => !accessedNow.has(u));
+    const map = drawGainMap(mapDiv, planPaths(plan), [...new Set(plan.stops.map(s => s.u))], gained);   // gain.js
+    if (map) planMaps.set(plan.id, map);
+  };
+  card.addEventListener('toggle', () => setTimeout(drawMap, 0));
+  if (card.open) setTimeout(drawMap, 0);
+
   // ボタン
   const buttons = el('div', 'buttons');
-  const recordBtn = el('button', 'primary', plan.result ? '結果を記録し直す' : '結果を記録する');
-  recordBtn.type = 'button';
-  recordBtn.disabled = !appState.resolved;
-  recordBtn.addEventListener('click', () => recordPlanResult(plan.id));
   const delBtn = el('button', '', 'このプランを消す');
   delBtn.type = 'button';
   delBtn.addEventListener('click', () => {
     if (confirm(`「${plan.name}」を消しますか？（ほかのデバイスからも消えます）`)) deletePlan(plan.id);
   });
-  buttons.append(recordBtn, delBtn);
+  buttons.append(delBtn);
   card.append(buttons);
-  card.append(el('p', 'help', '遠征のあとに駅メモマップ2のエクスポートを取り込んでから「結果を記録する」を押すと、回れた駅・回れなかった駅が記録されます。'));
 
   // プラン名・日付を変える
   const edit = el('details', 'plan-edit');

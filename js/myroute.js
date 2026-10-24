@@ -318,6 +318,9 @@ function renderMyRoute() {
     box.append(rbox);
   }
 
+  // この候補で埋まる駅（gain.js）：通る駅・乗っている途中で取れる駅・レーダーで取る駅
+  box.append(gainView([...route.along, ...radar.ok.map(r => r.u)]));
+
   // 選んだ候補の中身（区間ごとの乗り方）
   const stops = el('ol', 'route-list');
   route.order.forEach((u, i) => {
