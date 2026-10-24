@@ -1,15 +1,24 @@
 // ============================================================
 // 巡回ルート：回る駅を1駅ずつ選ぶ
 //
-// 3つの方法で、同じ「回る駅」の一覧（routeSettings.picked）に入れる。
-//   ・地図で選ぶ … 駅の印を押すと入り、もう一度押すと外れる（アクセス済みの駅も選べる）
-//   ・駅名で足す … 駅名を入れて「足す」。同じ名前の駅がいくつかあれば選ぶ（アクセス済みの駅も選べる）
-//   ・路線から選ぶ … 路線を選ぶと、その路線の未アクセス駅がチェックつきで並ぶ
+// 駅の取り方は3つ。地図・駅名・路線の一覧のどれで選んでも、いま選んでいる取り方で入る。
+//   ・チェックイン（青）  … 実際に行く駅。回る順番は、この駅だけで考える（routeSettings.picked）
+//   ・レーダー（紫）      … チェックインする駅から、レーダーで取る駅（routeSettings.radar：駅 → どの駅から）
+//                           「どの駅から」を決めていなければ、いちばん近いチェックイン駅から取る
+//   ・ルートビューン（緑）… 2つのチェックイン駅の間の駅を取る（routeSettings.rv：[{ a, b }]）
+//                           2駅を両方通る路線ごとに、路線の並びで2駅の間にある駅が取れる
+//                           （例: 東京と品川 → 新橋、有楽町〜高輪ゲートウェイ）
 // 選んだ駅と選び方は、このブラウザに覚えておく（次に開いたときも残る）。
 // ============================================================
 
 const PICK_STORE_KEY = 'ekimemo-route-pick';   // 覚えておく場所（localStorage）
-const PICK_SHOWN_MAX = 120;                     // 「回る駅」の一覧に並べる上限
+const PICK_SHOWN_MAX = 120;                     // 一覧に並べる上限
+
+const PICK_ROLES = [
+  { value: 'checkin', label: 'チェックイン' },
+  { value: 'radar', label: 'レーダー' },
+  { value: 'rv', label: 'ルートビューン' },
+];
 
 let pickLeafletMap = null;
 let pickLayer = null;
@@ -17,16 +26,22 @@ let pickMarkers = new Map();   // 駅メモの駅 → 地図の印
 let pickMapFitted = false;     // 最初に地図の範囲を合わせたか
 let pickLineCd = '';           // 「路線から選ぶ」で選んでいる路線
 let pickShowDone = true;       // アクセス済みの駅も地図に出すか
+let pickRole = 'checkin';      // いま選んでいる取り方
+let rvPending = null;          // ルートビューンで、1つ目に押した駅
 
 // ---------- 準備（route.js の initRouteScreen から呼ばれる） ----------
 
 function initRoutePick() {
+  routeSettings.radar = new Map();
+  routeSettings.rv = [];
   // 覚えていた中身を戻す
   try {
     const saved = JSON.parse(localStorage.getItem(PICK_STORE_KEY) || 'null');
     if (saved) {
       if (saved.mode === 'prefs' || saved.mode === 'stations') routeSettings.mode = saved.mode;
       if (Array.isArray(saved.picked)) routeSettings.picked = new Set(saved.picked.filter(u => MASTER.units[u]));
+      if (Array.isArray(saved.radar)) routeSettings.radar = new Map(saved.radar.filter(([u]) => MASTER.units[u]));
+      if (Array.isArray(saved.rv)) routeSettings.rv = saved.rv.filter(p => MASTER.units[p.a] && MASTER.units[p.b]);
     }
   } catch (e) { /* 覚えていなくても動く */ }
 
@@ -39,11 +54,33 @@ function initRoutePick() {
       fitRoutePickMap();
     });
   });
+  // 取り方の切り替え
+  const roleBox = document.getElementById('routePickRoles');
+  for (const r of PICK_ROLES) {
+    const b = el('button', 'chip role-chip role-' + r.value, r.label);
+    b.type = 'button';
+    b.dataset.role = r.value;
+    b.addEventListener('click', () => {
+      pickRole = r.value;
+      const old = rvPending;
+      rvPending = null;
+      if (old) restylePick([old]);
+      renderPickRoles();
+      renderPickLineStations();
+    });
+    roleBox.append(b);
+  }
+  renderPickRoles();
+
   document.getElementById('routePickClear').addEventListener('click', () => {
-    if (routeSettings.picked.size && !confirm(`回る駅 ${routeSettings.picked.size} 駅をすべて外しますか？`)) return;
+    const n = routeSettings.picked.size + routeSettings.radar.size;
+    if (n && !confirm('選んだ駅をすべて外しますか？（チェックイン・レーダー・ルートビューンのすべて）')) return;
     routeSettings.picked.clear();
+    routeSettings.radar.clear();
+    routeSettings.rv = [];
+    rvPending = null;
     pickChanged();
-    restyleAllPickMarkers();
+    drawPickMap();
   });
   document.getElementById('routePickNameForm').addEventListener('submit', e => { e.preventDefault(); addPickByName(); });
   document.getElementById('routePickLineSearch').addEventListener('input', fillPickLines);
@@ -56,11 +93,16 @@ function initRoutePick() {
 
 function storePick() {
   try {
-    localStorage.setItem(PICK_STORE_KEY, JSON.stringify({ mode: routeSettings.mode, picked: [...routeSettings.picked] }));
+    localStorage.setItem(PICK_STORE_KEY, JSON.stringify({
+      mode: routeSettings.mode,
+      picked: [...routeSettings.picked],
+      radar: [...routeSettings.radar],
+      rv: routeSettings.rv,
+    }));
   } catch (e) { /* 覚えられなくても動く */ }
 }
 
-// ---------- 選び方の切り替え ----------
+// ---------- 選び方・取り方の切り替え ----------
 
 function renderRouteMode() {
   const stations = routeSettings.mode === 'stations';
@@ -68,6 +110,22 @@ function renderRouteMode() {
   document.getElementById('routePickBox').hidden = !stations;
   document.getElementById('routePrefBox').hidden = stations;
   updateRouteCount();   // route.js
+}
+
+function renderPickRoles() {
+  document.querySelectorAll('#routePickRoles .chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.role === pickRole)));
+  const help = {
+    checkin: '地図の駅を押すと「チェックインする駅」に入ります。もう一度押すと外れます。',
+    radar: '地図の駅を押すと「レーダーで取る駅」に入ります。どのチェックイン駅から取るかは、下の一覧で選べます（決めなければ、いちばん近いチェックイン駅）。',
+    rv: '地図の駅を2つ順に押すと、2駅がチェックイン駅になり、その間の駅が「ルートビューンで取る駅」になります。',
+  };
+  setPickMessage(help[pickRole], '');
+}
+
+function setPickMessage(text, kind) {
+  const msg = document.getElementById('routePickRoleMsg');
+  msg.textContent = text;
+  msg.className = 'message' + (kind ? ' ' + kind : '');
 }
 
 // ---------- 選べる駅 ----------
@@ -89,11 +147,190 @@ function pickableAny(u) {
   return pickable(u) || pickDone(u);
 }
 
-function setPicked(u, on) {
-  if (on) routeSettings.picked.add(u); else routeSettings.picked.delete(u);
+// ---------- ルートビューン ----------
+
+// 2駅を両方通る路線ごとに、路線の並びで2駅の間にある駅を集める
+// 戻り値: { lines: 両方を通る路線の数, units: [間の駅]（重なり無し） }
+function rvBetween(a, b) {
+  const units = [];
+  const seen = new Set([a, b]);
+  let lines = 0;
+  for (const line of Object.values(MASTER.lines)) {
+    const order = [];
+    for (const sc of line.stations) {
+      const u = MASTER.stations[sc].u;
+      if (order[order.length - 1] !== u) order.push(u);
+    }
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    if (ia < 0 || ib < 0) continue;
+    lines++;
+    const [from, to] = ia < ib ? [ia, ib] : [ib, ia];
+    for (let i = from + 1; i < to; i++) {
+      if (!seen.has(order[i])) { seen.add(order[i]); units.push(order[i]); }
+    }
+  }
+  return { lines, units };
 }
 
-// 回る駅が変わったとき：一覧・路線の欄・数を描き直して、覚えておく
+// ルートビューンの区間ごとの、取れる駅（2駅がまだチェックイン駅のものだけ）
+function rvPairs() {
+  return routeSettings.rv
+    .filter(p => routeSettings.picked.has(p.a) && routeSettings.picked.has(p.b))
+    .map(p => {
+      const units = rvBetween(p.a, p.b).units.filter(u => routeSettings.withClosed || !MASTER.units[u].closed || pickDone(u));
+      return { a: p.a, b: p.b, units, todo: units.filter(u => !pickDone(u)) };
+    });
+}
+
+// ルートビューンで取れる駅すべて
+function rvUnitSet() {
+  const set = new Set();
+  for (const p of rvPairs()) for (const u of p.units) set.add(u);
+  return set;
+}
+
+// ---------- レーダー ----------
+
+// レーダーで取る駅を、どのチェックイン駅から取るか（決めていなければ、いちばん近いチェックイン駅）
+//   checkins … 使えるチェックイン駅（省くと、選んだチェックイン駅すべて）
+function radarFrom(u, checkins) {
+  const list = checkins || [...routeSettings.picked];
+  const chosen = routeSettings.radar.get(u);
+  if (chosen && list.includes(chosen)) return chosen;
+  let best = null, bestD = Infinity;
+  for (const c of list) {
+    const d = routeDistKm(MASTER.units[u], MASTER.units[c]);   // routeplan.js
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
+}
+
+// レーダーで取る駅（「廃駅も対象にする」を外したときは、未アクセスの廃駅を除く）
+function radarTargets() {
+  return [...routeSettings.radar.keys()].filter(u => MASTER.units[u] && (pickDone(u) || routeSettings.withClosed || !MASTER.units[u].closed));
+}
+
+// 順番を出したあとの、レーダー・ルートビューンのまとめ（route.js の結果の表示と保存で使う）
+//   order … 回る順番（チェックイン駅）
+// 戻り値: { radarAt: Map(チェックイン駅 → [レーダーで取る駅]), radarFromOf: Map(駅 → チェックイン駅),
+//          rv: [{ a, b, units, todo }], targets: [この遠征で取る未アクセス駅（レーダー・ルートビューン）] }
+function routeExtras(order) {
+  const out = { radarAt: new Map(), radarFromOf: new Map(), rv: [], targets: [] };
+  if (routeSettings.mode !== 'stations') return out;
+  const checkins = [...new Set(order)];
+  const targets = new Set();
+  for (const u of radarTargets()) {
+    const from = radarFrom(u, checkins);
+    if (!from) continue;
+    if (!out.radarAt.has(from)) out.radarAt.set(from, []);
+    out.radarAt.get(from).push(u);
+    out.radarFromOf.set(u, from);
+    if (!pickDone(u)) targets.add(u);
+  }
+  out.rv = rvPairs().filter(p => checkins.includes(p.a) && checkins.includes(p.b));
+  for (const p of out.rv) for (const u of p.todo) targets.add(u);
+  out.targets = [...targets];
+  return out;
+}
+
+// ---------- 取り方を変える ----------
+
+// その駅の、いまの取り方（'checkin' / 'radar' / 'rv' / null）
+function roleOf(u, rvSet) {
+  if (routeSettings.picked.has(u)) return 'checkin';
+  if (routeSettings.radar.has(u)) return 'radar';
+  if ((rvSet || rvUnitSet()).has(u)) return 'rv';
+  return null;
+}
+
+// チェックイン駅から外す（その駅を使うルートビューンも外し、その駅からのレーダーは「いちばん近い駅」に戻す）
+// 戻り値: 見た目が変わる駅
+function removeCheckin(u) {
+  const changed = [u];
+  routeSettings.picked.delete(u);
+  const keep = [];
+  for (const p of routeSettings.rv) {
+    if (p.a === u || p.b === u) changed.push(p.a, p.b, ...rvBetween(p.a, p.b).units);
+    else keep.push(p);
+  }
+  routeSettings.rv = keep;
+  for (const [t, from] of routeSettings.radar) if (from === u) routeSettings.radar.set(t, '');
+  return changed;
+}
+
+function addCheckin(u) {
+  routeSettings.radar.delete(u);
+  routeSettings.picked.add(u);
+  return [u];
+}
+
+function addRadar(u) {
+  const changed = routeSettings.picked.has(u) ? removeCheckin(u) : [];
+  routeSettings.radar.set(u, '');
+  return [...changed, u];
+}
+
+// 地図の印を押したとき（駅名で足したときも、ここを通る）
+//   toggle … もう同じ取り方で入っていたら外す（地図）。false なら「もう入っています」と知らせる（駅名）
+function pickStation(u, toggle) {
+  const name = MASTER.units[u].name;
+  let changed = [];
+  if (pickRole === 'checkin') {
+    if (routeSettings.picked.has(u)) {
+      if (!toggle) { setPickMessage(`${name} は、もうチェックインする駅に入っています。`, ''); return; }
+      changed = removeCheckin(u);
+      setPickMessage(`${name} をチェックインする駅から外しました。`, '');
+    } else {
+      changed = addCheckin(u);
+      setPickMessage(`${name} をチェックインする駅に入れました。`, 'good');
+    }
+  } else if (pickRole === 'radar') {
+    if (routeSettings.radar.has(u)) {
+      if (!toggle) { setPickMessage(`${name} は、もうレーダーで取る駅に入っています。`, ''); return; }
+      routeSettings.radar.delete(u);
+      changed = [u];
+      setPickMessage(`${name} をレーダーで取る駅から外しました。`, '');
+    } else {
+      changed = addRadar(u);
+      setPickMessage(`${name} をレーダーで取る駅に入れました。`, 'good');
+    }
+  } else {
+    // ルートビューン：2駅を順に押す
+    if (!rvPending) {
+      rvPending = u;
+      changed = addCheckin(u);
+      setPickMessage(`ルートビューン：${name} を選びました。次に、もう一方の駅を押してください。`, '');
+    } else if (rvPending === u) {
+      rvPending = null;
+      changed = [u];
+      setPickMessage('ルートビューンの1つ目の駅の選択をやめました（チェックイン駅には残っています）。', '');
+    } else {
+      const a = rvPending;
+      rvPending = null;
+      const between = rvBetween(a, u);
+      const aName = MASTER.units[a].name;
+      if (between.lines === 0) {
+        changed = [a];
+        setPickMessage(`${aName} と ${name} を両方通る路線がないため、ルートビューンにできません。`, 'error');
+      } else if (between.units.length === 0) {
+        changed = [a];
+        setPickMessage(`${aName} と ${name} の間に駅がありません（となりの駅です）。`, 'error');
+      } else if (routeSettings.rv.some(p => (p.a === a && p.b === u) || (p.a === u && p.b === a))) {
+        changed = [a];
+        setPickMessage(`${aName}⇔${name} は、もうルートビューンに入っています。`, '');
+      } else {
+        changed = [a, ...addCheckin(u), ...between.units];
+        routeSettings.rv.push({ a, b: u });
+        const todo = between.units.filter(v => !pickDone(v)).length;
+        setPickMessage(`ルートビューン：${aName}⇔${name} で ${between.units.length} 駅（うち未アクセス ${todo} 駅）を取ります。`, 'good');
+      }
+    }
+  }
+  pickChanged();
+  restylePick(changed);
+}
+
+// 選んだ駅が変わったとき：一覧・路線の欄・数を描き直して、覚えておく
 function pickChanged() {
   storePick();
   renderPickedList();
@@ -105,51 +342,128 @@ function pickChanged() {
 
 function renderRoutePick() {
   if (!appState.resolved || routeSettings.mode !== 'stations') return;
-  // 駅マスタから無くなった駅は、回る駅から外す（アクセス済みになった駅は、選んだまま残す）
-  let removed = 0;
-  for (const u of [...routeSettings.picked]) {
-    if (!MASTER.units[u]) { routeSettings.picked.delete(u); removed++; }
-  }
-  if (removed) storePick();
   renderPickedList();
   fillPickLines();
   renderPickLineStations();
   drawPickMap();
 }
 
-// 「回る駅」の一覧（押すと外れる）
+// 一覧の小さなボタン
+function pickChip(u, role, onRemove) {
+  const unit = MASTER.units[u];
+  const b = el('button', `chip picked-chip role-${role}` + (pickDone(u) ? ' picked-done' : ''),
+    `${unit.name}${unit.closed ? '（廃駅）' : ''}${pickDone(u) ? '（アクセス済み）' : ''} ✕`);
+  b.type = 'button';
+  b.title = `${unit.name}（${prefName(unit.pref)}）を外す`;
+  b.addEventListener('click', onRemove);
+  return b;
+}
+
+// 選んだ駅の一覧（チェックイン・レーダー・ルートビューン）
 function renderPickedList() {
-  const targets = routeTargets();   // route.js
+  const checkins = routeTargets();   // route.js
+  const radars = radarTargets();
+  const pairs = rvPairs();
+  const rvTodo = new Set(pairs.flatMap(p => p.todo)).size;
   const box = document.getElementById('routePickedList');
   box.replaceChildren();
-  const closedOut = [...routeSettings.picked].filter(u => !pickableAny(u) && MASTER.units[u] && MASTER.units[u].closed).length;
-  document.getElementById('routePickedCount').textContent = `回る駅 ${targets.length} 駅`;
-  document.getElementById('routePickClear').hidden = routeSettings.picked.size === 0;
-  if (targets.length === 0) {
-    box.append(el('p', 'muted', 'まだ選んでいません。下の地図・駅名・路線から選んでください。'));
+  document.getElementById('routePickedCount').textContent =
+    `チェックイン ${checkins.length} 駅・レーダー ${radars.length} 駅・ルートビューン ${rvTodo} 駅`;
+  document.getElementById('routePickClear').hidden = routeSettings.picked.size + routeSettings.radar.size === 0;
+  if (checkins.length + radars.length === 0) {
+    box.append(el('p', 'muted', 'まだ選んでいません。取り方を選んでから、下の地図・駅名・路線から選んでください。'));
     return;
   }
-  for (const u of targets.slice(0, PICK_SHOWN_MAX)) {
-    const unit = MASTER.units[u];
-    const b = el('button', 'chip picked-chip' + (pickDone(u) ? ' picked-done' : ''), `${unit.name}${unit.closed ? '（廃駅）' : ''}${pickDone(u) ? '（アクセス済み）' : ''} ✕`);
-    b.type = 'button';
-    b.title = `${unit.name}（${prefName(unit.pref)}）を外す`;
-    b.addEventListener('click', () => { setPicked(u, false); pickChanged(); restylePickMarker(u); });
-    box.append(b);
+
+  // チェックイン
+  const g1 = el('div', 'picked-group');
+  g1.append(el('div', 'picked-title role-checkin-text', `チェックインする駅（${checkins.length}）`));
+  const chips1 = el('div', 'route-picked-list');
+  for (const u of checkins.slice(0, PICK_SHOWN_MAX)) {
+    chips1.append(pickChip(u, 'checkin', () => { const c = removeCheckin(u); pickChanged(); restylePick(c); }));
   }
-  if (targets.length > PICK_SHOWN_MAX) box.append(el('span', 'muted', `ほか ${targets.length - PICK_SHOWN_MAX} 駅`));
+  if (checkins.length > PICK_SHOWN_MAX) chips1.append(el('span', 'muted', `ほか ${checkins.length - PICK_SHOWN_MAX} 駅`));
+  if (checkins.length === 0) chips1.append(el('span', 'muted', 'まだありません（レーダーやルートビューンは、チェックイン駅から使います）'));
+  g1.append(chips1);
+  box.append(g1);
+
+  // レーダー（どの駅から取るかを選べる）
+  if (radars.length) {
+    const g2 = el('div', 'picked-group');
+    g2.append(el('div', 'picked-title role-radar-text', `レーダーで取る駅（${radars.length}）`));
+    const list = el('div', 'picked-radar-list');
+    for (const u of radars.slice(0, PICK_SHOWN_MAX)) {
+      const row = el('div', 'picked-radar-row');
+      row.append(pickChip(u, 'radar', () => { routeSettings.radar.delete(u); pickChanged(); restylePick([u]); }));
+      const sel = el('select', 'picked-radar-from');
+      sel.setAttribute('aria-label', `${MASTER.units[u].name} をどの駅から取るか`);
+      const auto = radarFrom(u);
+      sel.append(new Option(auto ? `自動（いちばん近い ${MASTER.units[auto].name}）から` : '自動（チェックイン駅がまだありません）', ''));
+      for (const c of checkins) sel.append(new Option(`${MASTER.units[c].name} から`, c));
+      const chosen = routeSettings.radar.get(u);
+      sel.value = chosen && routeSettings.picked.has(chosen) ? chosen : '';
+      sel.addEventListener('change', () => { routeSettings.radar.set(u, sel.value); storePick(); renderPickedList(); });
+      row.append(sel);
+      list.append(row);
+    }
+    if (radars.length > PICK_SHOWN_MAX) list.append(el('span', 'muted', `ほか ${radars.length - PICK_SHOWN_MAX} 駅`));
+    g2.append(list);
+    box.append(g2);
+  }
+
+  // ルートビューン（区間ごと）
+  if (pairs.length) {
+    const g3 = el('div', 'picked-group');
+    g3.append(el('div', 'picked-title role-rv-text', `ルートビューン（${pairs.length} 区間）`));
+    for (const p of pairs) {
+      const row = el('div', 'picked-rv-row');
+      const del = el('button', 'chip picked-chip role-rv', `${MASTER.units[p.a].name}⇔${MASTER.units[p.b].name} ✕`);
+      del.type = 'button';
+      del.title = 'このルートビューンを外す（2駅はチェックイン駅に残ります）';
+      del.addEventListener('click', () => {
+        routeSettings.rv = routeSettings.rv.filter(q => !(q.a === p.a && q.b === p.b));
+        pickChanged();
+        restylePick(p.units);
+      });
+      row.append(del, el('span', 'picked-rv-units', p.todo.length
+        ? `未アクセス ${p.todo.length} 駅：` + p.todo.map(u => MASTER.units[u].name).join('、')
+        : '間の駅はすべてアクセス済みです'));
+      g3.append(row);
+    }
+    box.append(g3);
+  }
+  const closedOut = [...routeSettings.picked, ...routeSettings.radar.keys()].filter(u => !pickableAny(u) && MASTER.units[u] && MASTER.units[u].closed).length;
   if (closedOut) box.append(el('p', 'help', `「廃駅も対象にする」を外しているため、選んだ廃駅 ${closedOut} 駅は数に入れていません。`));
 }
 
 // ---------- 地図で選ぶ ----------
 
-function pickStyle(u) {
+function pickStyle(u, rvSet) {
   const unit = MASTER.units[u];
-  if (routeSettings.picked.has(u)) return { radius: 8, color: '#ffffff', weight: 2, dashArray: null, fillColor: cssColor('--accent'), fillOpacity: 1 };
+  const role = roleOf(u, rvSet);
+  if (role === 'checkin') {
+    return u === rvPending
+      ? { radius: 9, color: cssColor('--rv'), weight: 4, dashArray: null, fillColor: cssColor('--accent'), fillOpacity: 1 }
+      : { radius: 8, color: '#ffffff', weight: 2, dashArray: null, fillColor: cssColor('--accent'), fillOpacity: 1 };
+  }
+  if (role === 'radar') return { radius: 7, color: '#ffffff', weight: 2, dashArray: null, fillColor: cssColor('--radar'), fillOpacity: 1 };
+  if (role === 'rv') return { radius: 6, color: '#ffffff', weight: 1.5, dashArray: null, fillColor: cssColor('--rv'), fillOpacity: pickDone(u) ? 0.6 : 1 };
   // アクセス済み：押して選べるよう、地図の道路にまぎれない濃さにする
   if (pickDone(u)) return { radius: 5, color: '#ffffff', weight: 1.5, dashArray: null, fillColor: cssColor('--muted'), fillOpacity: 0.9 };
   if (unit.closed) return { radius: 5, color: cssColor('--muted'), weight: 2, dashArray: '2 2', fillColor: cssColor('--surface'), fillOpacity: 0.8 };
   return { radius: 6, color: '#ffffff', weight: 1.5, dashArray: null, fillColor: cssColor('--todo'), fillOpacity: 0.95 };
+}
+
+// 地図に出す駅か
+function pickShown(u, rvSet) {
+  return pickable(u) || roleOf(u, rvSet) !== null || (pickDone(u) && pickShowDone);
+}
+
+function pickTooltip(u, rvSet) {
+  const unit = MASTER.units[u];
+  const role = roleOf(u, rvSet);
+  const roleText = { checkin: '・チェックイン', radar: '・レーダー', rv: '・ルートビューン' }[role] || '';
+  return unit.name + (unit.closed ? '（廃駅）' : '') + (pickDone(u) ? '（アクセス済み）' : '') + (roleText ? `【${roleText.slice(1)}】` : '');
 }
 
 function drawPickMap() {
@@ -169,27 +483,25 @@ function drawPickMap() {
   }
   pickLayer.clearLayers();
   pickMarkers = new Map();
-  // アクセス済み → 廃駅 → 未アクセス → 回る駅 の順に描き、回る駅が一番上に来るようにする
+  const rvSet = rvUnitSet();
+  // アクセス済み → 廃駅 → 未アクセス → ルートビューン → レーダー → チェックイン の順に描き、選んだ駅が上に来るようにする
   // アクセス済みの駅は「アクセス済みの駅も地図に出す」のときだけ（選んだ駅はいつも出す）
-  const units = Object.keys(MASTER.units).filter(u => pickable(u) || (pickDone(u) && (pickShowDone || routeSettings.picked.has(u))));
-  const rank = u => routeSettings.picked.has(u) ? 3 : pickDone(u) ? 0 : MASTER.units[u].closed ? 1 : 2;
+  const units = Object.keys(MASTER.units).filter(u => pickShown(u, rvSet));
+  const roleRank = { rv: 3, radar: 4, checkin: 5 };
+  const rank = u => roleRank[roleOf(u, rvSet)] || (pickDone(u) ? 0 : MASTER.units[u].closed ? 1 : 2);
   units.sort((a, b) => rank(a) - rank(b));
   for (const u of units) {
     const unit = MASTER.units[u];
-    const marker = L.circleMarker([unit.lat, unit.lon], pickStyle(u));
-    marker.bindTooltip(unit.name + (unit.closed ? '（廃駅）' : '') + (pickDone(u) ? '（アクセス済み）' : ''), { direction: 'top', offset: [0, -4] });
-    marker.on('click', () => {
-      setPicked(u, !routeSettings.picked.has(u));
-      pickChanged();
-      restylePickMarker(u);
-    });
+    const marker = L.circleMarker([unit.lat, unit.lon], pickStyle(u, rvSet));
+    marker.bindTooltip(() => pickTooltip(u), { direction: 'top', offset: [0, -4] });
+    marker.on('click', () => pickStation(u, true));
     pickLayer.addLayer(marker);
     pickMarkers.set(u, marker);
   }
   // 最初の1回だけ、選んだ駅が入るように範囲を合わせる
   if (!pickMapFitted) {
     pickMapFitted = true;
-    const sel = routeTargets();
+    const sel = [...routeTargets(), ...radarTargets()];
     setTimeout(() => {
       if (!pickLeafletMap) return;
       pickLeafletMap.invalidateSize();
@@ -198,17 +510,17 @@ function drawPickMap() {
   }
 }
 
-function restylePickMarker(u) {
-  // アクセス済みの駅を出さない設定のときは、出す・消すが変わるので描き直す
-  if (pickDone(u) && !pickShowDone) { drawPickMap(); return; }
-  const m = pickMarkers.get(u);
-  if (!m) return;
-  m.setStyle(pickStyle(u));
-  if (routeSettings.picked.has(u)) m.bringToFront();
-}
-
-function restyleAllPickMarkers() {
-  drawPickMap();
+// 見た目が変わった駅だけ、印を描き直す（出す・消すが変わるときは、地図全体を描き直す）
+function restylePick(units) {
+  if (!pickLeafletMap) return;
+  const rvSet = rvUnitSet();
+  for (const u of new Set(units)) {
+    const m = pickMarkers.get(u);
+    if (!!m !== pickShown(u, rvSet)) { drawPickMap(); return; }
+    if (!m) continue;
+    m.setStyle(pickStyle(u, rvSet));
+    if (roleOf(u, rvSet)) m.bringToFront();
+  }
 }
 
 // 画面や地図の欄が見えたとき：地図を描く（描いてあれば大きさを測り直す）
@@ -236,18 +548,16 @@ function addPickByName() {
     say(`「${text}」は廃駅です。「廃駅も対象にする」にチェックを入れると選べます。`, 'error');
     return;
   }
+  const roleName = PICK_ROLES.find(r => r.value === pickRole).label;
   const add = u => {
-    if (routeSettings.picked.has(u)) { say(`${MASTER.units[u].name} は、もう回る駅に入っています。`, ''); return; }
-    setPicked(u, true);
-    pickChanged();
-    restylePickMarker(u);
-    say(`${MASTER.units[u].name}（${prefName(MASTER.units[u].pref)}${pickDone(u) ? '・アクセス済み' : ''}）を足しました。`, 'good');
+    pickStation(u, false);   // いま選んでいる取り方で入れる（結果は取り方の欄の下に出る）
+    say(`${MASTER.units[u].name}（${prefName(MASTER.units[u].pref)}${pickDone(u) ? '・アクセス済み' : ''}）を「${roleName}」で選びました。`, 'good');
     input.value = '';
     choices.replaceChildren();
   };
   if (ok.length === 1) { add(ok[0]); return; }
   // 同じ名前の駅がいくつかあるときは、選んでもらう
-  say(`「${text}」は ${ok.length} 駅あります。足す駅を選んでください。`, '');
+  say(`「${text}」は ${ok.length} 駅あります。選ぶ駅を押してください。`, '');
   for (const u of ok) {
     const b = el('button', '', candidateLabel(u) + (pickDone(u) ? '（アクセス済み）' : ''));   // myroute.js
     b.type = 'button';
@@ -287,6 +597,20 @@ function fillPickLines() {
   renderPickLineStations();
 }
 
+// 路線の一覧では、チェックインかレーダーで入れる（ルートビューンを選んでいるときは、チェックインで入れる）
+function lineRole() {
+  return pickRole === 'radar' ? 'radar' : 'checkin';
+}
+
+function setLineStation(u, on) {
+  if (!on) {
+    const changed = routeSettings.picked.has(u) ? removeCheckin(u) : [u];
+    routeSettings.radar.delete(u);
+    return changed;
+  }
+  return lineRole() === 'radar' ? addRadar(u) : addCheckin(u);
+}
+
 function renderPickLineStations() {
   const box = document.getElementById('routePickLineStations');
   box.replaceChildren();
@@ -296,25 +620,30 @@ function renderPickLineStations() {
   const units = s.remaining.filter(pickable);   // 路線の並び順
   if (units.length === 0) { box.append(el('p', 'muted', 'この路線に選べる未アクセス駅はありません。')); return; }
 
+  const roleName = lineRole() === 'radar' ? 'レーダー' : 'チェックイン';
+  if (pickRole === 'rv') box.append(el('p', 'help', 'ルートビューンは、地図か駅名で2駅を順に選んでください。この一覧では「チェックイン」で入ります。'));
   const buttons = el('div', 'buttons');
-  const allOn = el('button', '', `この路線の残り ${units.length} 駅をすべて選ぶ`);
+  const allOn = el('button', '', `この路線の残り ${units.length} 駅をすべて「${roleName}」で選ぶ`);
   allOn.type = 'button';
-  allOn.addEventListener('click', () => { units.forEach(u => setPicked(u, true)); pickChanged(); units.forEach(restylePickMarker); });
+  allOn.addEventListener('click', () => { const c = units.flatMap(u => setLineStation(u, true)); pickChanged(); restylePick(c); });
   const allOff = el('button', '', 'この路線の駅をすべて外す');
   allOff.type = 'button';
-  allOff.addEventListener('click', () => { units.forEach(u => setPicked(u, false)); pickChanged(); units.forEach(restylePickMarker); });
+  allOff.addEventListener('click', () => { const c = units.flatMap(u => setLineStation(u, false)); pickChanged(); restylePick(c); });
   buttons.append(allOn, allOff);
   box.append(buttons);
 
+  const rvSet = rvUnitSet();
   const list = el('div', 'route-pick-stations');
   for (const u of units) {
     const unit = MASTER.units[u];
+    const role = roleOf(u, rvSet);
     const label = el('label', 'check');
     const cb = el('input');
     cb.type = 'checkbox';
-    cb.checked = routeSettings.picked.has(u);
-    cb.addEventListener('change', () => { setPicked(u, cb.checked); pickChanged(); restylePickMarker(u); });
+    cb.checked = role === 'checkin' || role === 'radar';
+    cb.addEventListener('change', () => { const c = setLineStation(u, cb.checked); pickChanged(); restylePick(c); });
     label.append(cb, ` ${unit.name}${unit.closed ? '（廃駅）' : ''}`);
+    if (role) label.append(' ', el('span', `role-tag role-${role}`, { checkin: 'チェックイン', radar: 'レーダー', rv: 'ルートビューン' }[role]));
     list.append(label);
   }
   box.append(list);

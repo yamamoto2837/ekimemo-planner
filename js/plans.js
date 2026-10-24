@@ -76,8 +76,9 @@ function todayText() {
 // ---------- プランを作る・直す・消す ----------
 
 // 巡回ルートの結果（routeplan.js の planRoute の戻り値）から、プランを作って保存する
-// targets … 回る対象の未アクセス駅（出発駅がもともとアクセス済みなら入らない）
-async function addPlanFromRoute(name, date, route, startUnit, round, targets) {
+// targets … 回る対象の駅（出発駅がもともとアクセス済みなら入らない）
+// extras … レーダー・ルートビューンで取る駅（routepick.js の routeExtras。無ければ省略）
+async function addPlanFromRoute(name, date, route, startUnit, round, targets, extras) {
   const lineLabel = lc => lc === 'transfer' ? '乗り換え' : lc === 'guess' ? '線路データ無し（推定）' : String(lc).startsWith('closed:') ? lineName(lc) : (MASTER.lines[lc] ? MASTER.lines[lc].name : lc);
   const plan = {
     id: newPlanId(),
@@ -88,7 +89,12 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets) {
     round,
     start: startUnit || null,
     stops: route.order.map(u => ({ u, name: MASTER.units[u].name, pref: MASTER.units[u].pref })),
-    targets: [...new Set(route.order.filter(u => targets.has(u)))],
+    // 回る対象：チェックインする駅と、レーダー・ルートビューンで取る未アクセス駅
+    targets: [...new Set([...route.order.filter(u => targets.has(u)), ...(extras ? extras.targets : [])])],
+    // レーダーで取る駅（from … どのチェックイン駅から取るか）
+    radar: extras ? [...extras.radarFromOf].map(([u, from]) => ({ u, from })) : [],
+    // ルートビューン（a・b … 2つのチェックイン駅、units … 間の駅）
+    rv: extras ? extras.rv.map(p => ({ a: p.a, b: p.b, units: p.units })) : [],
     legs: route.legs.map(l => ({
       km: Math.round(l.km * 10) / 10,
       rides: l.rides.map(r => ({ line: lineLabel(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
@@ -166,6 +172,25 @@ async function recordPlanResult(id) {
 // 回る対象の駅（古い形のプランなら、並びの駅すべて）
 function planTargets(plan) {
   return plan.targets || [...new Set(plan.stops.map(s => s.u))];
+}
+
+// 駅の番号を駅名にする（駅マスタに無ければ、保存したときの駅名。それも無ければ番号のまま）
+function planStationName(plan, u) {
+  if (MASTER.units[u]) return MASTER.units[u].name;
+  const stop = plan.stops.find(s => s.u === u);
+  return stop ? stop.name : String(u);
+}
+
+// 「レーダー：A、B✓」のような1行（アクセス済みの駅には ✓ を付ける）
+function planExtraLine(kind, title, units, accessed, plan) {
+  const line = el('div', 'route-extra route-extra-' + kind);
+  line.append(el('b', '', `${title}：`));
+  units.forEach((u, k) => {
+    if (k > 0) line.append('、');
+    const done = accessed.has(u);
+    line.append(el('span', done ? 'route-extra-done' : '', planStationName(plan, u) + (done ? '✓' : '')));
+  });
+  return line;
 }
 
 function setPlanNote(id, text, status) {
@@ -248,7 +273,7 @@ function planCard(plan) {
     const res = el('div', 'plan-result');
     res.append(el('b', '', `結果（${when} に記録）：回れた駅 ${r.visited.length} ／ 回れなかった駅 ${r.missed.length}`));
     if (r.missed.length) {
-      res.append(el('div', 'help', '回れなかった駅: ' + r.missed.map(u => (plan.stops.find(s => s.u === u) || {}).name || u).join('、')));
+      res.append(el('div', 'help', '回れなかった駅: ' + r.missed.map(u => planStationName(plan, u)).join('、')));
     }
     card.append(res);
   }
@@ -311,10 +336,28 @@ function planCard(plan) {
         });
         rides.append(via);
       }
+      // この区間でルートビューンを使うとき
+      const prev = plan.stops[i - 1].u;
+      for (const p of plan.rv || []) {
+        if ((p.a === prev && p.b === s.u) || (p.b === prev && p.a === s.u)) {
+          rides.append(planExtraLine('rv', `ルートビューン（${planStationName(plan, p.a)}⇔${planStationName(plan, p.b)}）`, p.units, accessed, plan));
+        }
+      }
       li.append(rides);
     }
+    // この駅からレーダーで取る駅（戻ってきた出発駅では出さない）
+    const radarHere = isReturn ? [] : (plan.radar || []).filter(r => r.from === s.u).map(r => r.u);
+    if (radarHere.length) li.append(planExtraLine('radar', 'レーダー', radarHere, accessed, plan));
     list.append(li);
   });
+  // 順番の中で2駅が続いていないルートビューンは、まとめて出す
+  const order = plan.stops.map(s => s.u);
+  const apart = (plan.rv || []).filter(p => !routeAdjacent(order, p.a, p.b));   // route.js
+  if (apart.length) {
+    const box = el('div', 'plan-result');
+    for (const p of apart) box.append(planExtraLine('rv', `ルートビューン（${planStationName(plan, p.a)}⇔${planStationName(plan, p.b)}）`, p.units, accessed, plan));
+    card.append(box);
+  }
   card.append(list);
   return card;
 }

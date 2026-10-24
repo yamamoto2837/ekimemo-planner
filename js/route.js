@@ -12,7 +12,9 @@ const ROUTE_MAX_TARGETS = 300;   // 一度に回る駅の上限（多いと計�
 
 const routeSettings = {
   mode: 'stations',   // 'stations' = 駅を選ぶ、'prefs' = 都道府県で選ぶ
-  picked: new Set(),  // 駅を選ぶときの、回る駅（駅メモの駅の番号）
+  picked: new Set(),  // 駅を選ぶときの、チェックインする駅（駅メモの駅の番号）。回る順番はこの駅で考える
+  radar: new Map(),   // レーダーで取る駅 → どのチェックイン駅から取るか（'' なら、いちばん近い駅）
+  rv: [],             // ルートビューン：[{ a, b }]（2つのチェックイン駅の間の駅を取る）
   prefs: new Set(),   // 選んだ都道府県
   round: false,       // 出発駅に戻ってくるか
   withClosed: true,   // 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れる）
@@ -172,11 +174,26 @@ function renderRouteResult(plan, startUnit, targetSet) {
   box.replaceChildren();
   if (plan.order.length === 0) { box.append(el('p', 'muted', '回れる駅がありませんでした。')); return; }
 
-  // 回る未アクセス駅の数（出発駅も未アクセスなら数に入れる）
+  // 回る駅の数（出発駅も対象なら数に入れる）
   const visitCount = new Set(plan.order.filter(u => targetSet.has(u))).size;
+  // レーダー・ルートビューンで取る駅（routepick.js。都道府県で選ぶときは空）
+  const extras = routeExtras(plan.order);
+  const accessed = appState.resolved.accessed;
   const head = el('div', 'panel');
-  head.append(el('h3', '', `${visitCount} 駅を回る順番`));
+  head.append(el('h3', '', routeSettings.mode === 'stations' ? `${visitCount} 駅にチェックインする順番` : `${visitCount} 駅を回る順番`));
   head.append(el('p', 'detail-count', `線路に沿った距離 約 ${Math.round(plan.totalKm)} km`));
+  if (routeSettings.mode === 'stations') {
+    const ciTodo = new Set(plan.order.filter(u => !accessed.has(u))).size;
+    const radarTodo = [...extras.radarFromOf.keys()].filter(u => !accessed.has(u)).length;
+    const rvTodo = new Set(extras.rv.flatMap(p => p.todo)).size;
+    head.append(el('p', 'route-take',
+      `この遠征で取る未アクセス駅：チェックイン ${ciTodo}・レーダー ${radarTodo}・ルートビューン ${rvTodo}（合計 ${new Set([...plan.order.filter(u => !accessed.has(u)), ...extras.targets]).size} 駅）`));
+    // ルートビューンの2駅が、順番の中で続いていないとき
+    const apart = extras.rv.filter(p => !routeAdjacent(plan.order, p.a, p.b));
+    if (apart.length) {
+      head.append(el('p', 'notice', `ルートビューンの ${apart.map(p => `${MASTER.units[p.a].name}⇔${MASTER.units[p.b].name}`).join('、')} は、順番の中で2駅が続いていません。間に別の駅へ寄る順番になっています。`));
+    }
+  }
   head.append(el('p', 'help', '乗り換え時間や運行本数は考えていません。机の上で計画を立てるための目安です。'));
   if (plan.guessed.length > 0) {
     head.append(el('p', 'notice', `線路のデータが無い駅（新幹線だけの駅や廃駅など）を含むため、${plan.guessed.length} 駅の前後は、近くの駅から直線で推定しています。`));
@@ -207,7 +224,7 @@ function renderRouteResult(plan, startUnit, targetSet) {
     if (!dateInput.value) { saveMsg.textContent = '日付を入れてください。'; saveMsg.className = 'message error'; return; }
     saveBtn.disabled = true;
     try {
-      const id = await addPlanFromRoute(name, dateInput.value, plan, startUnit, routeSettings.round, targetSet);
+      const id = await addPlanFromRoute(name, dateInput.value, plan, startUnit, routeSettings.round, targetSet, extras);
       saveMsg.replaceChildren(document.createTextNode('保存しました。'));
       const a = el('a', '', '遠征プランを見る');
       a.href = '#plans/' + encodeURIComponent(id);
@@ -256,19 +273,46 @@ function renderRouteResult(plan, startUnit, targetSet) {
           : `${lineName(r.line)}：${MASTER.units[r.from].name}→${MASTER.units[r.to].name}`;
         rides.append(el('div', (r.line === 'guess' || String(r.line).startsWith('closed:')) ? 'route-ride guess' : 'route-ride', t));
       }
+      // この区間でルートビューンを使うとき
+      for (const p of extras.rv) {
+        if (!((p.a === plan.order[i - 1] && p.b === u) || (p.b === plan.order[i - 1] && p.a === u))) continue;
+        rides.append(routeExtraLine('rv', `ルートビューン（${MASTER.units[p.a].name}⇔${MASTER.units[p.b].name}）`, p.units, accessed));
+      }
       li.append(rides);
     }
+    // この駅からレーダーで取る駅（戻ってきた出発駅では出さない）
+    if (!isReturn && extras.radarAt.has(u)) li.append(routeExtraLine('radar', 'レーダー', extras.radarAt.get(u), accessed));
     const memo = memoView(stationMemo(u));
     if (memo) li.append(memo);
     list.append(li);
   });
   box.append(list);
 
-  drawRouteMap(plan, startUnit);
+  drawRouteMap(plan, startUnit, extras);
+}
+
+// 順番の中で、2駅がとなり合っているか（出発駅に戻るときは、最後と最初もとなり）
+function routeAdjacent(order, a, b) {
+  for (let i = 0; i + 1 < order.length; i++) {
+    if ((order[i] === a && order[i + 1] === b) || (order[i] === b && order[i + 1] === a)) return true;
+  }
+  return false;
+}
+
+// 「レーダー：A、B✓」のような1行（kind は 'radar' か 'rv'。アクセス済みの駅には ✓ を付ける）
+function routeExtraLine(kind, title, units, accessed) {
+  const line = el('div', 'route-extra route-extra-' + kind);
+  line.append(el('b', '', `${title}：`));
+  units.forEach((u, k) => {
+    if (k > 0) line.append('、');
+    const done = accessed.has(u);
+    line.append(el('span', done ? 'route-extra-done' : '', MASTER.units[u].name + (done ? '✓' : '')));
+  });
+  return line;
 }
 
 // 地図に、番号と通る道すじを描く
-function drawRouteMap(plan, startUnit) {
+function drawRouteMap(plan, startUnit, extras) {
   if (!window.L) {
     document.getElementById('routeMapView').replaceChildren(el('p', 'message error map-error', '地図の部品を読み込めませんでした。'));
     return;
@@ -288,6 +332,21 @@ function drawRouteMap(plan, startUnit) {
     pts.push([unit.lat, unit.lon]);
   }
   if (pts.length > 1) L.polyline(pts, { color: cssColor('--accent'), weight: 3, opacity: 0.7 }).addTo(routeLayerGroup);
+
+  // ルートビューン（緑）とレーダー（紫。取るチェックイン駅と点線で結ぶ）で取る駅
+  if (extras) {
+    for (const p of extras.rv) for (const u of p.units) {
+      const unit = MASTER.units[u];
+      L.circleMarker([unit.lat, unit.lon], { radius: 5, color: '#ffffff', weight: 1.5, fillColor: cssColor('--rv'), fillOpacity: 0.95 })
+        .bindTooltip(`${unit.name}（ルートビューン）`).addTo(routeLayerGroup);
+    }
+    for (const [u, from] of extras.radarFromOf) {
+      const unit = MASTER.units[u], f = MASTER.units[from];
+      L.polyline([[f.lat, f.lon], [unit.lat, unit.lon]], { color: cssColor('--radar'), weight: 1.5, dashArray: '4 4', opacity: 0.8 }).addTo(routeLayerGroup);
+      L.circleMarker([unit.lat, unit.lon], { radius: 6, color: '#ffffff', weight: 1.5, fillColor: cssColor('--radar'), fillOpacity: 0.95 })
+        .bindTooltip(`${unit.name}（${f.name} からレーダー）`).addTo(routeLayerGroup);
+    }
+  }
 
   // 回る駅に番号
   plan.order.forEach((u, i) => {

@@ -200,17 +200,30 @@
 
         <!-- 駅を1つずつ選ぶ -->
         <div id="routePickBox" class="route-pick">
-          <p class="help">地図の駅を押す・駅名を入れる・路線から選ぶ、のどれでも「回る駅」に入ります。</p>
+          <p class="help">地図の駅を押す・駅名を入れる・路線から選ぶ、のどれでも、下で選んだ取り方で入ります。回る順番は「チェックイン」の駅で考え、レーダー・ルートビューンの駅は、チェックイン駅で取る駅として並べます。</p>
+          <div class="pick-roles">
+            <span class="pick-roles-label">取り方：</span>
+            <div class="chips" id="routePickRoles" role="group" aria-label="駅の取り方"></div>
+          </div>
+          <p id="routePickRoleMsg" class="message" role="status"></p>
           <div class="route-picked">
             <div class="route-picked-head">
               <b id="routePickedCount">回る駅 0 駅</b>
               <button type="button" id="routePickClear" class="memo-button">すべて外す</button>
             </div>
-            <div id="routePickedList" class="route-picked-list"></div>
+            <div id="routePickedList" class="route-picked-groups"></div>
           </div>
           <details open class="route-pick-part" id="routePickMapBox">
             <summary>地図で選ぶ</summary>
-            <p class="help">赤い印が未アクセス駅（点線の印は廃駅）、灰色の印がアクセス済みの駅、青い印が回る駅です。印を押すと回る駅に入り、もう一度押すと外れます。アクセス済みの駅も、立ち寄りたい駅として選べます。</p>
+            <p class="help">
+              <span class="legend-dot" style="background: var(--todo)"></span>未アクセス
+              <span class="legend-dot legend-closed"></span>廃駅
+              <span class="legend-dot" style="background: var(--muted)"></span>アクセス済み
+              <span class="legend-dot" style="background: var(--accent)"></span>チェックイン
+              <span class="legend-dot" style="background: var(--radar)"></span>レーダー
+              <span class="legend-dot" style="background: var(--rv)"></span>ルートビューン
+              ／ アクセス済みの駅も選べます。
+            </p>
             <label class="check"><input type="checkbox" id="routePickShowDone" checked> アクセス済みの駅も地図に出す</label>
             <div id="routePickMap" class="route-map"></div>
           </details>

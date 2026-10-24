@@ -18,6 +18,8 @@
   --todo: #e5484d;          /* 未アクセスの駅 */
   --todo-ring: #fbd5d6;
   --done: #a8b0bd;          /* アクセス済みの駅 */
+  --radar: #7c3aed;         /* レーダーで取る駅 */
+  --rv: #0f9d58;            /* ルートビューンで取る駅 */
   --radius: 8px;
 }
 @media (prefers-color-scheme: dark) {
@@ -37,6 +39,8 @@
     --todo: #ff6369;
     --todo-ring: #5a2326;
     --done: #59616e;
+    --radar: #a78bfa;
+    --rv: #4ade80;
   }
 }
 
@@ -367,6 +371,44 @@ select {
 .route-picked-list p { margin: 0; }
 .picked-chip { font-size: 13px; padding: 2px 10px; }
 .picked-chip.picked-done { color: var(--muted); }
+
+/* 取り方（チェックイン・レーダー・ルートビューン）の色分け */
+.pick-roles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+.pick-roles-label { font-size: 13px; font-weight: bold; color: var(--muted); }
+.role-chip.role-checkin[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+.role-chip.role-radar[aria-pressed="true"] { background: var(--radar); border-color: var(--radar); }
+.role-chip.role-rv[aria-pressed="true"] { background: var(--rv); border-color: var(--rv); }
+.picked-chip.role-checkin { border-color: var(--accent); }
+.picked-chip.role-radar { border-color: var(--radar); }
+.picked-chip.role-rv { border-color: var(--rv); }
+.route-picked-groups { max-height: 420px; overflow: auto; }
+.route-picked-groups > p { margin: 0; }
+.picked-group { margin-top: 10px; }
+.picked-group:first-child { margin-top: 0; }
+.picked-title { font-size: 13px; font-weight: bold; margin-bottom: 4px; }
+.role-checkin-text { color: var(--accent); }
+.role-radar-text { color: var(--radar); }
+.role-rv-text { color: var(--rv); }
+.picked-radar-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.picked-radar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.picked-radar-from { font-size: 13px; padding: 2px 6px; }
+.picked-rv-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 4px; font-size: 13px; }
+.picked-rv-units { overflow-wrap: anywhere; }
+.role-tag { font-size: 11px; padding: 0 6px; border-radius: 8px; color: #ffffff; }
+.role-tag.role-checkin { background: var(--accent); }
+.role-tag.role-radar { background: var(--radar); }
+.role-tag.role-rv { background: var(--rv); }
+.legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #ffffff; box-shadow: 0 0 0 1px var(--border); margin: 0 3px 0 8px; vertical-align: -1px; }
+.legend-dot:first-child { margin-left: 0; }
+.legend-dot.legend-closed { background: var(--surface); border: 2px dashed var(--muted); box-shadow: none; }
+.route-take { font-size: 14px; font-weight: bold; }
+.route-extra { margin-top: 3px; font-size: 13px; overflow-wrap: anywhere; padding-left: 8px; border-left: 3px solid; }
+.route-extra-radar { border-color: var(--radar); }
+.route-extra-radar b { color: var(--radar); }
+.route-extra-rv { border-color: var(--rv); }
+.route-extra-rv b { color: var(--rv); }
+.route-extra-done { color: var(--muted); }
+.route-stop > .route-extra { margin-left: calc(2.2em + 20px); }
 .route-pick-stations { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 8px; max-height: 320px; overflow: auto; }
 .route-region { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
 .route-region-name { font-weight: bold; min-width: 5.5em; }
