@@ -192,11 +192,71 @@ function planGainUnits(plan) {
   return [...set];
 }
 
-// 地図に描く道すじ（保存した道すじが無い前のプランは、立ち寄る駅を直線で結ぶ）
+// 地図に描く道すじ（実際に通る駅の並び）
+// 保存した道すじが無い前のプランは、保存してある「乗る路線と、どこからどこまで乗るか」から作り直す
+const planPathCache = new Map();   // プランの番号 → 作り直した道すじ
+
 function planPaths(plan) {
   const legs = plan.legs || [];
   if (legs.length && legs.every(l => l.path && l.path.length)) return legs.map(l => l.path);
-  return [plan.stops.map(s => s.u)];
+  const key = plan.id + '@' + plan.updatedAt;
+  if (!planPathCache.has(key)) planPathCache.set(key, legs.map((l, i) => rebuildLegPath(plan, i)));
+  return planPathCache.get(key);
+}
+
+// 名前が name の駅のうち、駅 near にいちばん近い駅
+function nearestUnitByName(name, near) {
+  const hits = Object.keys(MASTER.units).filter(u => MASTER.units[u].name === name);
+  if (hits.length <= 1 || !near) return hits[0] || null;
+  return hits.reduce((best, u) => routeDistKm(MASTER.units[u], MASTER.units[near]) < routeDistKm(MASTER.units[best], MASTER.units[near]) ? u : best);
+}
+
+// 路線の駅の並び（駅メモの駅の番号。続けて同じ駅は1つにする）
+function lineUnitOrder(line) {
+  const order = [];
+  for (const sc of line.stations) {
+    const u = MASTER.stations[sc].u;
+    if (order[order.length - 1] !== u) order.push(u);
+  }
+  return order;
+}
+
+// 1つの区間の道すじを、乗る路線から作り直す
+function rebuildLegPath(plan, i) {
+  const from = plan.stops[i] && plan.stops[i].u, to = plan.stops[i + 1] && plan.stops[i + 1].u;
+  if (!MASTER.units[from] || !MASTER.units[to]) return [from, to].filter(u => MASTER.units[u]);
+  const g = routeGraph();   // routeplan.js
+  const shortest = (a, b) => {
+    const leg = routeLegs(g, [a, b]).legs[0];
+    return leg && isFinite(leg.km) ? legPath(leg) : [a, b];
+  };
+  const path = [from];
+  let cur = from;
+  for (const r of plan.legs[i].rides || []) {
+    const target = nearestUnitByName(r.to, cur);
+    if (!target) continue;
+    const name = String(r.line).replace(/（廃止区間・直線で推定）$/, '');
+    let seg = null;
+    // 同じ名前の路線の駅の並びから、乗った区間を切り出す
+    for (const line of Object.values(MASTER.lines)) {
+      if (line.name !== name) continue;
+      const order = lineUnitOrder(line);
+      const a = order.indexOf(cur);
+      if (a < 0) continue;
+      // 行き先の駅は、名前で探す（同じ名前が2つあれば、乗る駅に近いほう）
+      const bs = order.map((u, k) => MASTER.units[u].name === r.to ? k : -1).filter(k => k >= 0);
+      if (!bs.length) continue;
+      const b = bs.reduce((x, y) => Math.abs(y - a) < Math.abs(x - a) ? y : x);
+      seg = a <= b ? order.slice(a, b + 1) : order.slice(b, a + 1).reverse();
+      break;
+    }
+    // 路線から切り出せないとき（乗り換え・推定など）は、いちばん短い道でつなぐ
+    if (!seg) seg = r.line === '乗り換え' ? [cur, target] : shortest(cur, target);
+    for (const u of seg.slice(1)) path.push(u);
+    cur = seg[seg.length - 1];
+  }
+  if (cur !== to) for (const u of shortest(cur, to).slice(1)) path.push(u);
+  return path;
 }
 
 // 開いたプランの地図（プランの番号 → Leaflet の地図）
