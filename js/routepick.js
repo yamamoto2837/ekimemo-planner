@@ -696,7 +696,7 @@ function pickLineStats() {
   return byCd;
 }
 
-// 路線の選択肢（未アクセス駅が残っている路線だけ。絞り込みの文字があれば、その文字を含む路線だけ）
+// 路線の選択肢（すべての路線。絞り込みの文字があれば、その文字を含む路線だけ）
 function fillPickLines() {
   const select = document.getElementById('routePickLine');
   const word = document.getElementById('routePickLineSearch').value.trim();
@@ -705,12 +705,12 @@ function fillPickLines() {
   for (const [cd, line] of Object.entries(MASTER.lines)) {
     if (word && !line.name.includes(word)) continue;
     const s = byCd[cd];
-    const n = s ? s.remaining.filter(pickable).length : 0;
-    if (n > 0) lines.push({ cd, name: line.name, n });
+    if (!s) continue;
+    lines.push({ cd, name: line.name, n: s.remaining.filter(pickable).length, total: s.stations.length });
   }
   lines.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   select.replaceChildren(new Option(lines.length ? `路線を選んでください（${lines.length} 路線）` : '当てはまる路線がありません', ''));
-  for (const l of lines) select.append(new Option(`${l.name}（残り ${l.n}）`, l.cd));
+  for (const l of lines) select.append(new Option(`${l.name}（全 ${l.total} 駅・${l.n ? '残り ' + l.n : 'コンプ'}）`, l.cd));
   // 絞り込みで1つに決まったら、その路線を選ぶ
   if (word && lines.length === 1) pickLineCd = lines[0].cd;
   select.value = lines.some(l => l.cd === pickLineCd) ? pickLineCd : '';
@@ -740,19 +740,30 @@ function renderPickLineStations() {
   if (!pickLineCd || !appState.resolved) return;
   const s = pickLineStats()[pickLineCd];
   if (!s) return;
-  const units = s.remaining.filter(pickable);   // 路線の並び順
-  if (units.length === 0) { box.append(el('p', 'muted', 'この路線に選べる未アクセス駅はありません。')); return; }
+  // 路線の全駅（路線の並び順）。アクセス済みの駅も選べる（未アクセスの廃駅は「廃駅も対象にする」のときだけ）
+  const units = s.stations.filter(pickableAny);
+  const todo = units.filter(pickable);
+  if (units.length === 0) { box.append(el('p', 'muted', 'この路線に選べる駅はありません。')); return; }
 
   const roleName = ROLE_NAMES[lineRole()];
   if (pickRole === 'rv') box.append(el('p', 'help', 'ルートビューンは、地図か駅名で2駅を順に選んでください。この一覧では「チェックイン」で入ります。'));
+  box.append(el('p', 'help', `全 ${units.length} 駅（うち未アクセス ${todo.length} 駅）。チェックを入れた駅が「${roleName}」で入ります。` +
+    (routeSettings.autoPass ? '「乗っている途中で取れる駅には寄らない」がオンなので、全駅を選んでも、途中で取れる駅には寄らない順番になります。' : '')));
   const buttons = el('div', 'buttons');
-  const allOn = el('button', '', `この路線の残り ${units.length} 駅をすべて「${roleName}」で選ぶ`);
+  const allOn = el('button', '', `全 ${units.length} 駅を選ぶ`);
   allOn.type = 'button';
   allOn.addEventListener('click', () => { const c = units.flatMap(u => setLineStation(u, true)); pickChanged(); restylePick(c); });
+  buttons.append(allOn);
+  if (todo.length && todo.length < units.length) {
+    const todoOn = el('button', '', `未アクセスの ${todo.length} 駅だけ選ぶ`);
+    todoOn.type = 'button';
+    todoOn.addEventListener('click', () => { const c = todo.flatMap(u => setLineStation(u, true)); pickChanged(); restylePick(c); });
+    buttons.append(todoOn);
+  }
   const allOff = el('button', '', 'この路線の駅をすべて外す');
   allOff.type = 'button';
   allOff.addEventListener('click', () => { const c = units.flatMap(u => setLineStation(u, false)); pickChanged(); restylePick(c); });
-  buttons.append(allOn, allOff);
+  buttons.append(allOff);
   box.append(buttons);
 
   const rvSet = rvUnitSet();
@@ -765,7 +776,8 @@ function renderPickLineStations() {
     cb.type = 'checkbox';
     cb.checked = role === 'checkin' || role === 'radar' || role === 'pass';
     cb.addEventListener('change', () => { const c = setLineStation(u, cb.checked); pickChanged(); restylePick(c); });
-    label.append(cb, ` ${unit.name}${unit.closed ? '（廃駅）' : ''}`);
+    if (pickDone(u)) label.classList.add('pick-line-done');
+    label.append(cb, ` ${unit.name}${unit.closed ? '（廃駅）' : ''}${pickDone(u) ? '✓' : ''}`);
     if (role) label.append(' ', el('span', `role-tag role-${role}`, ROLE_NAMES[role]));
     list.append(label);
   }
