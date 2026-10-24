@@ -20,6 +20,7 @@
   --done: #a8b0bd;          /* アクセス済みの駅 */
   --radar: #7c3aed;         /* レーダーで取る駅 */
   --rv: #0f9d58;            /* ルートビューンで取る駅 */
+  --pass: #ea7a00;          /* 途中で取る駅 */
   --radius: 8px;
 }
 @media (prefers-color-scheme: dark) {
@@ -41,6 +42,7 @@
     --done: #59616e;
     --radar: #a78bfa;
     --rv: #4ade80;
+    --pass: #ffa94d;
   }
 }
 
@@ -407,6 +409,13 @@ select {
 .route-extra-radar b { color: var(--radar); }
 .route-extra-rv { border-color: var(--rv); }
 .route-extra-rv b { color: var(--rv); }
+.route-extra-pass { border-color: var(--pass); }
+.route-extra-pass b { color: var(--pass); }
+.route-extra-picked { font-weight: bold; text-decoration: underline; text-decoration-color: var(--pass); }
+.role-chip.role-pass[aria-pressed="true"] { background: var(--pass); border-color: var(--pass); }
+.picked-chip.role-pass { border-color: var(--pass); }
+.role-pass-text { color: var(--pass); }
+.role-tag.role-pass { background: var(--pass); }
 .route-extra-done { color: var(--muted); }
 .route-stop > .route-extra { margin-left: calc(2.2em + 20px); }
 .route-pick-stations { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 8px; max-height: 320px; overflow: auto; }

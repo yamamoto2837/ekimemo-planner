@@ -79,6 +79,7 @@ function todayText() {
 // targets … 回る対象の駅（出発駅がもともとアクセス済みなら入らない）
 // extras … レーダー・ルートビューンで取る駅（routepick.js の routeExtras。無ければ省略）
 async function addPlanFromRoute(name, date, route, startUnit, round, targets, extras) {
+  const accessedNow = appState.resolved ? appState.resolved.accessed : new Set();
   const lineLabel = lc => lc === 'transfer' ? '乗り換え' : lc === 'guess' ? '線路データ無し（推定）' : String(lc).startsWith('closed:') ? lineName(lc) : (MASTER.lines[lc] ? MASTER.lines[lc].name : lc);
   const plan = {
     id: newPlanId(),
@@ -89,15 +90,21 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets, ex
     round,
     start: startUnit || null,
     stops: route.order.map(u => ({ u, name: MASTER.units[u].name, pref: MASTER.units[u].pref })),
-    // 回る対象：チェックインする駅と、レーダー・ルートビューンで取る未アクセス駅
-    targets: [...new Set([...route.order.filter(u => targets.has(u)), ...(extras ? extras.targets : [])])],
+    // 回る対象：チェックインする駅、寄らないことにした駅、レーダー・ルートビューン・途中で取る未アクセス駅
+    targets: [...new Set([...route.order.filter(u => targets.has(u)), ...(route.dropped || []), ...(extras ? extras.targets : [])])],
+    // 選んだけれど、乗っている途中で取れるので寄らないことにした駅
+    dropped: route.dropped || [],
     // レーダーで取る駅（from … どのチェックイン駅から取るか）
     radar: extras ? [...extras.radarFromOf].map(([u, from]) => ({ u, from })) : [],
     // ルートビューン（a・b … 2つのチェックイン駅、units … 間の駅）
     rv: extras ? extras.rv.map(p => ({ a: p.a, b: p.b, units: p.units })) : [],
-    legs: route.legs.map(l => ({
+    legs: route.legs.map((l, i) => ({
       km: Math.round(l.km * 10) / 10,
       rides: l.rides.map(r => ({ line: lineLabel(r.line), from: MASTER.units[r.from].name, to: MASTER.units[r.to].name })),
+      // 途中で取れる駅（選んだ駅か、保存したときに未アクセスの駅だけ）
+      pass: (l.pass || []).filter(u => targets.has(u) || !accessedNow.has(u)),
+      // 自分で「途中で取る」にした駅
+      mine: extras && extras.passAt.has(i) ? extras.passAt.get(i).map(p => p.u) : [],
     })),
     totalKm: Math.round(route.totalKm),
     note: '',
@@ -182,13 +189,15 @@ function planStationName(plan, u) {
 }
 
 // 「レーダー：A、B✓」のような1行（アクセス済みの駅には ✓ を付ける）
-function planExtraLine(kind, title, units, accessed, plan) {
+//   strong … 太字にする駅（選んだのに寄らないことにした駅）
+function planExtraLine(kind, title, units, accessed, plan, strong) {
   const line = el('div', 'route-extra route-extra-' + kind);
   line.append(el('b', '', `${title}：`));
   units.forEach((u, k) => {
     if (k > 0) line.append('、');
     const done = accessed.has(u);
-    line.append(el('span', done ? 'route-extra-done' : '', planStationName(plan, u) + (done ? '✓' : '')));
+    const cls = [done ? 'route-extra-done' : '', strong && strong.has(u) ? 'route-extra-picked' : ''].join(' ').trim();
+    line.append(el('span', cls, planStationName(plan, u) + (done ? '✓' : '')));
   });
   return line;
 }
@@ -343,6 +352,9 @@ function planCard(plan) {
           rides.append(planExtraLine('rv', `ルートビューン（${planStationName(plan, p.a)}⇔${planStationName(plan, p.b)}）`, p.units, accessed, plan));
         }
       }
+      // この区間に乗っている途中で取る駅（自動・指定）
+      if (leg.pass && leg.pass.length) rides.append(planExtraLine('pass', '途中で取る', leg.pass, accessed, plan, new Set(plan.dropped || [])));
+      if (leg.mine && leg.mine.length) rides.append(planExtraLine('pass', '途中で取る（指定）', leg.mine, accessed, plan));
       li.append(rides);
     }
     // この駅からレーダーで取る駅（戻ってきた出発駅では出さない）

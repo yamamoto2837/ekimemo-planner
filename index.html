@@ -200,7 +200,7 @@
 
         <!-- 駅を1つずつ選ぶ -->
         <div id="routePickBox" class="route-pick">
-          <p class="help">地図の駅を押す・駅名を入れる・路線から選ぶ、のどれでも、下で選んだ取り方で入ります。回る順番は「チェックイン」の駅で考え、レーダー・ルートビューンの駅は、チェックイン駅で取る駅として並べます。</p>
+          <p class="help">地図の駅を押す・駅名を入れる・路線から選ぶ、のどれでも、下で選んだ取り方で入ります。回る順番は「チェックイン」の駅で考え、レーダー・ルートビューン・途中で取る駅は、チェックイン駅や区間で取る駅として並べます。</p>
           <div class="pick-roles">
             <span class="pick-roles-label">取り方：</span>
             <div class="chips" id="routePickRoles" role="group" aria-label="駅の取り方"></div>
@@ -222,6 +222,7 @@
               <span class="legend-dot" style="background: var(--accent)"></span>チェックイン
               <span class="legend-dot" style="background: var(--radar)"></span>レーダー
               <span class="legend-dot" style="background: var(--rv)"></span>ルートビューン
+              <span class="legend-dot" style="background: var(--pass)"></span>途中で取る
               ／ アクセス済みの駅も選べます。
             </p>
             <label class="check"><input type="checkbox" id="routePickShowDone" checked> アクセス済みの駅も地図に出す</label>
@@ -256,6 +257,7 @@
         </form>
         <label class="check"><input type="checkbox" id="routeRound"> 出発駅に戻ってくる</label>
         <label class="check"><input type="checkbox" id="routeClosed" checked> 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れます）</label>
+        <label class="check"><input type="checkbox" id="routeAutoPass" checked> 乗っている途中で取れる駅には寄らない（線路の近くで、いちばん近い駅になる駅を自動で調べます）</label>
         <div class="buttons">
           <button type="button" id="routeRun" class="primary">順番を考える</button>
         </div>

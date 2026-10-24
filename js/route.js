@@ -15,6 +15,8 @@ const routeSettings = {
   picked: new Set(),  // 駅を選ぶときの、チェックインする駅（駅メモの駅の番号）。回る順番はこの駅で考える
   radar: new Map(),   // レーダーで取る駅 → どのチェックイン駅から取るか（'' なら、いちばん近い駅）
   rv: [],             // ルートビューン：[{ a, b }]（2つのチェックイン駅の間の駅を取る）
+  pass: new Set(),    // 自分で「途中で取る」にした駅（寄らずに、乗っている途中で取る）
+  autoPass: true,     // 乗っている途中で取れる駅には寄らない（自動で調べる）
   prefs: new Set(),   // 選んだ都道府県
   round: false,       // 出発駅に戻ってくるか
   withClosed: true,   // 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れる）
@@ -32,7 +34,10 @@ function initRouteScreen() {
   closedBox.addEventListener('change', e => { routeSettings.withClosed = e.target.checked; renderRoutePrefs(); renderRoutePick(); });
   document.getElementById('routeStartForm').addEventListener('submit', e => { e.preventDefault(); runRoute(); });
   document.getElementById('routeClearPrefs').addEventListener('click', () => { routeSettings.prefs.clear(); renderRoutePrefs(); });
-  initRoutePick();   // routepick.js（駅を1つずつ選ぶ欄）
+  initRoutePick();   // routepick.js（駅を1つずつ選ぶ欄。覚えていた設定もここで戻る）
+  const autoPass = document.getElementById('routeAutoPass');
+  autoPass.checked = routeSettings.autoPass;
+  autoPass.addEventListener('change', () => { routeSettings.autoPass = autoPass.checked; storePick(); });
 }
 
 // 回る駅の一覧
@@ -145,6 +150,15 @@ function runRoute() {
     let plan;
     try {
       plan = planRoute(targets, start.unit, routeSettings.round);
+      // 乗っている途中で取れる駅には寄らない（出発駅・レーダーを使う駅・ルートビューンの2駅は残す）
+      if (routeSettings.autoPass) {
+        const keep = routeKeepStops();   // routepick.js
+        if (start.unit) keep.add(start.unit);
+        plan = dropPassStops(plan, keep, routeSettings.round);   // routeplan.js
+      } else {
+        plan.dropped = [];
+      }
+      addLegPass(plan.legs);   // routeplan.js（区間ごとの、途中で取れる駅）
     } catch (e) {
       msg.textContent = '順番を計算できませんでした: ' + e.message;
       msg.className = 'message error';
@@ -176,23 +190,38 @@ function renderRouteResult(plan, startUnit, targetSet) {
 
   // 回る駅の数（出発駅も対象なら数に入れる）
   const visitCount = new Set(plan.order.filter(u => targetSet.has(u))).size;
-  // レーダー・ルートビューンで取る駅（routepick.js。都道府県で選ぶときは空）
-  const extras = routeExtras(plan.order);
+  // レーダー・ルートビューン・途中で取る駅（routepick.js。都道府県で選ぶときは空）
+  const extras = routeExtras(plan.order, plan.legs);
   const accessed = appState.resolved.accessed;
+  const dropped = new Set(plan.dropped || []);
+  // 区間の途中で取れる駅のうち、表示する駅（選んだ駅か、未アクセスの駅）
+  const legPassShown = leg => (leg.pass || []).filter(u => targetSet.has(u) || !accessed.has(u));
+  const passTodo = new Set(plan.legs.flatMap(l => legPassShown(l)).filter(u => !accessed.has(u)));
   const head = el('div', 'panel');
   head.append(el('h3', '', routeSettings.mode === 'stations' ? `${visitCount} 駅にチェックインする順番` : `${visitCount} 駅を回る順番`));
   head.append(el('p', 'detail-count', `線路に沿った距離 約 ${Math.round(plan.totalKm)} km`));
+  if (dropped.size) {
+    head.append(el('p', 'help', `乗っている途中で取れるため、次の ${dropped.size} 駅には寄らない順番にしました（「途中で取る」として区間に並べています）：${[...dropped].map(u => MASTER.units[u].name).join('、')}`));
+  }
   if (routeSettings.mode === 'stations') {
     const ciTodo = new Set(plan.order.filter(u => !accessed.has(u))).size;
     const radarTodo = [...extras.radarFromOf.keys()].filter(u => !accessed.has(u)).length;
     const rvTodo = new Set(extras.rv.flatMap(p => p.todo)).size;
+    const manualPass = [...extras.passAt.values()].flat().map(p => p.u).filter(u => !accessed.has(u));
+    const passAll = new Set([...passTodo, ...manualPass]);
+    const all = new Set([...plan.order.filter(u => !accessed.has(u)), ...extras.targets, ...passAll]);
     head.append(el('p', 'route-take',
-      `この遠征で取る未アクセス駅：チェックイン ${ciTodo}・レーダー ${radarTodo}・ルートビューン ${rvTodo}（合計 ${new Set([...plan.order.filter(u => !accessed.has(u)), ...extras.targets]).size} 駅）`));
+      `この遠征で取れる未アクセス駅：チェックイン ${ciTodo}・レーダー ${radarTodo}・ルートビューン ${rvTodo}・途中で取る ${passAll.size}（合計 ${all.size} 駅）`));
     // ルートビューンの2駅が、順番の中で続いていないとき
     const apart = extras.rv.filter(p => !routeAdjacent(plan.order, p.a, p.b));
     if (apart.length) {
       head.append(el('p', 'notice', `ルートビューンの ${apart.map(p => `${MASTER.units[p.a].name}⇔${MASTER.units[p.b].name}`).join('、')} は、順番の中で2駅が続いていません。間に別の駅へ寄る順番になっています。`));
     }
+  } else if (passTodo.size) {
+    head.append(el('p', 'route-take', `乗っている途中で取れる未アクセス駅：${passTodo.size} 駅`));
+  }
+  if (passTodo.size || dropped.size) {
+    head.append(el('p', 'help', '「途中で取る」は、駅と駅を直線で結んだ線の近くで、いちばん近い駅になる駅です。線路が大きく曲がっている所では、実際とずれることがあります。'));
   }
   head.append(el('p', 'help', '乗り換え時間や運行本数は考えていません。机の上で計画を立てるための目安です。'));
   if (plan.guessed.length > 0) {
@@ -278,6 +307,16 @@ function renderRouteResult(plan, startUnit, targetSet) {
         if (!((p.a === plan.order[i - 1] && p.b === u) || (p.b === plan.order[i - 1] && p.a === u))) continue;
         rides.append(routeExtraLine('rv', `ルートビューン（${MASTER.units[p.a].name}⇔${MASTER.units[p.b].name}）`, p.units, accessed));
       }
+      // この区間に乗っている途中で取れる駅（自動）と、自分で「途中で取る」にした駅
+      const auto = legPassShown(leg);
+      if (auto.length) rides.append(routeExtraLine('pass', '途中で取る', auto, accessed, dropped));
+      const mine = extras.passAt.get(i - 1) || [];
+      if (mine.length) {
+        const line = routeExtraLine('pass', '途中で取る（指定）', mine.map(p => p.u), accessed);
+        const far = mine.filter(p => p.km > 2);
+        if (far.length) line.append(el('span', 'muted', `（線路から離れた駅：${far.map(p => `${MASTER.units[p.u].name} 約 ${p.km.toFixed(1)} km`).join('、')}）`));
+        rides.append(line);
+      }
       li.append(rides);
     }
     // この駅からレーダーで取る駅（戻ってきた出発駅では出さない）
@@ -299,14 +338,16 @@ function routeAdjacent(order, a, b) {
   return false;
 }
 
-// 「レーダー：A、B✓」のような1行（kind は 'radar' か 'rv'。アクセス済みの駅には ✓ を付ける）
-function routeExtraLine(kind, title, units, accessed) {
+// 「レーダー：A、B✓」のような1行（kind は 'radar'・'rv'・'pass'。アクセス済みの駅には ✓ を付ける）
+//   strong … 太字にする駅（選んだのに寄らないことにした駅）
+function routeExtraLine(kind, title, units, accessed, strong) {
   const line = el('div', 'route-extra route-extra-' + kind);
   line.append(el('b', '', `${title}：`));
   units.forEach((u, k) => {
     if (k > 0) line.append('、');
     const done = accessed.has(u);
-    line.append(el('span', done ? 'route-extra-done' : '', MASTER.units[u].name + (done ? '✓' : '')));
+    const cls = [done ? 'route-extra-done' : '', strong && strong.has(u) ? 'route-extra-picked' : ''].join(' ').trim();
+    line.append(el('span', cls, MASTER.units[u].name + (done ? '✓' : '')));
   });
   return line;
 }
@@ -346,6 +387,13 @@ function drawRouteMap(plan, startUnit, extras) {
       L.circleMarker([unit.lat, unit.lon], { radius: 6, color: '#ffffff', weight: 1.5, fillColor: cssColor('--radar'), fillOpacity: 0.95 })
         .bindTooltip(`${unit.name}（${f.name} からレーダー）`).addTo(routeLayerGroup);
     }
+  }
+  // 途中で取る駅（オレンジ）：寄らないことにした駅と、自分で「途中で取る」にした駅
+  const passUnits = new Set([...(plan.dropped || []), ...(extras ? [...extras.passAt.values()].flat().map(p => p.u) : [])]);
+  for (const u of passUnits) {
+    const unit = MASTER.units[u];
+    L.circleMarker([unit.lat, unit.lon], { radius: 6, color: '#ffffff', weight: 1.5, fillColor: cssColor('--pass'), fillOpacity: 0.95 })
+      .bindTooltip(`${unit.name}（途中で取る）`).addTo(routeLayerGroup);
   }
 
   // 回る駅に番号

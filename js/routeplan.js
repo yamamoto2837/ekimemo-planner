@@ -80,6 +80,9 @@ function routeGraph() {
       .sort((a, b) => a.d - b.d).slice(0, ROUTE_GUESS_LINKS);
     for (const n of near) add(u, n.v, n.d * ROUTE_GUESS_RATE, 'guess');
   }
+  // ほかの線路と一か所もつながっていない駅のかたまり（廃線だけの駅など）は、
+  // いちばん大きなかたまりの、いちばん近い駅に推定でつなぐ（離れすぎている島などはつながない）
+  linkIsolatedGroups(adj, add);
 
   // 速く計算できるよう、番号の並び（CSR 形式）にする
   const ids = [...adj.keys()];
@@ -97,9 +100,50 @@ function routeGraph() {
   return routeGraphCache;
 }
 
+const ROUTE_ISOLATED_MAX_KM = 20;   // つながっていないかたまりを推定でつなぐ、いちばん遠い距離
+
+// つながっている駅のかたまり（連結成分）を求め、小さいかたまりを大きいかたまりにつなぐ
+function linkIsolatedGroups(adj, add) {
+  const groupOf = new Map();
+  const groups = [];
+  for (const start of adj.keys()) {
+    if (groupOf.has(start)) continue;
+    const id = groups.length;
+    const members = [start];
+    groupOf.set(start, id);
+    for (let k = 0; k < members.length; k++) {
+      for (const v of adj.get(members[k]).keys()) {
+        if (!groupOf.has(v)) { groupOf.set(v, id); members.push(v); }
+      }
+    }
+    groups.push(members);
+  }
+  if (groups.length < 2) return;
+  const mainId = groups.reduce((best, g, i) => g.length > groups[best].length ? i : best, 0);
+  const main = groups[mainId];
+  groups.forEach((g, i) => {
+    if (i === mainId) return;
+    // このかたまりの駅と、大きなかたまりの駅のうち、いちばん近い組を探す
+    let best = null;
+    for (const u of g) {
+      const a = MASTER.units[u];
+      for (const v of main) {
+        const b = MASTER.units[v];
+        if (Math.abs(a.lat - b.lat) > 0.2 || Math.abs(a.lon - b.lon) > 0.25) continue;   // 遠い駅は計算しない
+        const d = routeDistKm(a, b);
+        if (!best || d < best.d) best = { u, v, d };
+      }
+    }
+    if (best && best.d <= ROUTE_ISOLATED_MAX_KM) add(best.u, best.v, best.d * ROUTE_GUESS_RATE, 'guess');
+  });
+}
+
 // ---------- 2. 線路に沿った距離（ダイクストラ法） ----------
 
-function routeDijkstra(g, src) {
+// target を渡すと、その駅までの道が決まった時点で探すのをやめる（速くなる）
+// target が Set のときは、その中の駅すべての道が決まった時点でやめる
+function routeDijkstra(g, src, target) {
+  let left = target instanceof Set ? new Set(target) : null;
   const n = g.ids.length;
   const dist = new Float64Array(n).fill(Infinity);
   const prevEdge = new Int32Array(n).fill(-1);
@@ -139,6 +183,8 @@ function routeDijkstra(g, src) {
   while (heapNode.length > 0) {
     const [v, d] = pop();
     if (d > dist[v]) continue;
+    if (v === target) break;
+    if (left && left.delete(v) && left.size === 0) break;
     for (let k = g.start[v]; k < g.start[v + 1]; k++) {
       const w = g.to[k], nd = d + g.weight[k];
       if (nd < dist[w]) { dist[w] = nd; prevEdge[w] = k; prevNode[w] = v; push(w, nd); }
@@ -213,14 +259,24 @@ function planRoute(targets, startUnit, round) {
   // 点どうしの線路に沿った距離
   const m = points.length;
   const D = [];
+  const pointIdx = new Set(points.map(u => g.index.get(u)));
   for (let i = 0; i < m; i++) {
-    const r = routeDijkstra(g, g.index.get(points[i]));
+    const r = routeDijkstra(g, g.index.get(points[i]), pointIdx);   // 回る駅すべての距離が決まったらやめる
     D.push(points.map(u => r.dist[g.index.get(u)]));
   }
-  // つながっていない駅を外す（最初の点から行けない駅）
+  // つながっていない駅を外す。出発駅があれば出発駅から行けない駅、
+  // 無ければ「いちばん多くの駅に行ける駅」から行けない駅
+  let base = 0;
+  if (!startUnit) {
+    let bestCount = -1;
+    for (let i = 0; i < m; i++) {
+      const c = D[i].filter(isFinite).length;
+      if (c > bestCount) { bestCount = c; base = i; }
+    }
+  }
   const reach = [];
   const unreachable = [...missing];
-  for (let i = 0; i < m; i++) (isFinite(D[0][i]) ? reach : unreachable).push(i);
+  for (let i = 0; i < m; i++) (isFinite(D[base][i]) ? reach : unreachable).push(i);
   const P = reach.map(i => points[i]);
   const DD = reach.map(i => reach.map(j => D[i][j]));
   const k = P.length;
@@ -264,7 +320,7 @@ function routeLegs(g, orderUnits) {
   for (let i = 0; i + 1 < orderUnits.length; i++) {
     const from = g.index.get(orderUnits[i]), toIdx = g.index.get(orderUnits[i + 1]);
     if (from === undefined || toIdx === undefined) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
-    const r = routeDijkstra(g, from);
+    const r = routeDijkstra(g, from, toIdx);
     if (!isFinite(r.dist[toIdx])) { broken.push(i); legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: Infinity, rides: [] }); continue; }
     const edges = [];
     for (let v = toIdx; v !== from; v = r.prevNode[v]) edges.push({ node: v, prev: r.prevNode[v], line: g.line[r.prevEdge[v]], w: g.weight[r.prevEdge[v]] });
@@ -280,6 +336,134 @@ function routeLegs(g, orderUnits) {
     legs.push({ from: orderUnits[i], to: orderUnits[i + 1], km: r.dist[toIdx], rides });
   }
   return { legs, guessed, broken };
+}
+
+// ---------- 4. 乗っている途中で取れる駅 ----------
+//
+// 駅メモでは、チェックインした場所からいちばん近い駅が取れる。
+// そこで、区間の道すじ（駅と駅を直線で結んだ線）の上に 0.3km おきに点を置き、
+// 点ごとに「いちばん近い駅」を調べる。出てきた駅は、その区間に乗っている途中で取れる駅とみなす。
+// 線路の形のデータは無いので、線路が大きく曲がっている所では、実際とずれることがある。
+
+const PASS_STEP_KM = 0.3;   // 点を置く間隔
+
+// 区間の乗り方（rides）に沿って、途中で取れる駅を順に集める（両はしの駅も入る）
+// 線路データの無い「推定」のつなぎは、実際には乗れないので調べない
+function passAlongRides(rides) {
+  const out = [];
+  const seen = new Set();
+  const add = u => { if (!seen.has(u)) { seen.add(u); out.push(u); } };
+  for (const r of rides) {
+    if (r.line === 'guess') { add(r.from); add(r.to); continue; }
+    for (let i = 0; i + 1 < r.path.length; i++) {
+      const a = MASTER.units[r.path[i]], b = MASTER.units[r.path[i + 1]];
+      add(r.path[i]);
+      const steps = Math.max(1, Math.ceil(routeDistKm(a, b) / PASS_STEP_KM));
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const near = radarNearest(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t, 1);   // radarplan.js
+        if (near.length) add(near[0].u);
+      }
+      add(r.path[i + 1]);
+    }
+  }
+  return out;
+}
+
+// 2駅の間の、いちばん短い道で途中に取れる駅（両はしの駅も入る）。つながっていなければ null
+function passBetween(g, a, b) {
+  const { legs, broken } = routeLegs(g, [a, b]);
+  if (broken.length) return null;
+  return new Set(passAlongRides(legs[0].rides));
+}
+
+// 回る順番から、ほかの区間の途中で取れる駅を外す（その駅には寄らない）。
+//   plan … planRoute の戻り値
+//   keep … 外さない駅（出発駅、レーダーを使う駅、ルートビューンの2駅など）
+// 戻り値: 新しい plan（dropped: [外した駅] を足したもの）
+function dropPassStops(plan, keep, round) {
+  const g = routeGraph();
+  // 出発駅に戻るときは、最後の「戻ってきた出発駅」を除いて考える
+  const core = round && plan.order.length > 1 ? plan.order.slice(0, -1) : plan.order.slice();
+  const dropped = [];
+  for (let i = 0; i < core.length && core.length > 1;) {
+    const t = core[i];
+    if (keep.has(t)) { i++; continue; }
+    const n = core.length;
+    const prev = i > 0 ? core[i - 1] : (round ? core[n - 1] : null);
+    const next = i < n - 1 ? core[i + 1] : (round ? core[0] : null);
+    let ok = false;
+    if (prev && next && prev !== next) {
+      // 前の駅から次の駅へ、t に寄らずに進んでも、途中で t が取れるか
+      const s = passBetween(g, prev, next);
+      ok = !!(s && s.has(t));
+    } else if (prev || next) {
+      // 端の駅：となりの駅と、そのまた先の駅の区間の途中で t が取れるか
+      const nb = prev || next;
+      const j = core.indexOf(nb);
+      const nb2 = prev ? core[j - 1] : core[j + 1];
+      if (nb2) { const s = passBetween(g, nb2, nb); ok = !!(s && s.has(t)); }
+    }
+    if (ok) { dropped.push(t); core.splice(i, 1); }
+    else i++;
+  }
+  if (dropped.length === 0) return { ...plan, dropped };
+  const order = round && core.length > 1 ? [...core, core[0]] : core;
+  const { legs, guessed } = routeLegs(g, order);
+  return {
+    ...plan,
+    order,
+    legs,
+    totalKm: legs.reduce((s, l) => s + (isFinite(l.km) ? l.km : 0), 0),
+    guessed: [...new Set([...plan.guessed, ...guessed])],
+    dropped,
+  };
+}
+
+// 区間ごとに、途中で取れる駅（両はしの駅を除く）を leg.pass に入れる
+function addLegPass(legs) {
+  for (const l of legs) {
+    l.pass = isFinite(l.km) ? passAlongRides(l.rides).filter(u => u !== l.from && u !== l.to) : [];
+  }
+  return legs;
+}
+
+// 地点 p から、区間の道すじ（駅を結んだ線）までの、いちばん近い距離（km）
+function distToLegKm(p, leg) {
+  let best = Infinity;
+  for (const r of leg.rides) {
+    for (let i = 0; i + 1 < r.path.length; i++) {
+      const a = MASTER.units[r.path[i]], b = MASTER.units[r.path[i + 1]];
+      // 小さな範囲なので、平らな地図とみなして点と線分の距離を求める
+      const kx = 111.32 * Math.cos(p.lat * Math.PI / 180), ky = 111.0;
+      const ax = (a.lon - p.lon) * kx, ay = (a.lat - p.lat) * ky;
+      const bx = (b.lon - p.lon) * kx, by = (b.lat - p.lat) * ky;
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+      const x = ax + dx * t, y = ay + dy * t;
+      best = Math.min(best, Math.sqrt(x * x + y * y));
+    }
+  }
+  return best;
+}
+
+// 自分で「途中で取る」にした駅を、いちばん近い区間に割り当てる
+// 戻り値: Map(区間の番号 → [{ u, km: 道すじからの距離 }])
+function assignPassToLegs(units, legs) {
+  const out = new Map();
+  for (const u of units) {
+    let best = -1, bestKm = Infinity;
+    legs.forEach((l, i) => {
+      if (!isFinite(l.km)) return;
+      const d = distToLegKm(MASTER.units[u], l);
+      if (d < bestKm) { bestKm = d; best = i; }
+    });
+    if (best < 0) continue;
+    if (!out.has(best)) out.set(best, []);
+    out.get(best).push({ u, km: bestKm });
+  }
+  return out;
 }
 
 // 自分で決めた順番（駅の並び）のまま、区間ごとの乗り方を求める。
