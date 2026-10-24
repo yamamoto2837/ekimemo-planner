@@ -349,7 +349,7 @@ function routeLegs(g, orderUnits, weight) {
 //   ・○○→○○ を別の路線で … 1つの区間だけ「別の道」にしたもの
 // 区間の「別の道」は、いちばん短い道で通った線をなるべく避けて選んだ道（長すぎるもの・推定のつなぎを使うものは除く）。
 
-const ROUTE_AVOID_RATE = 10;        // 別の道を探すとき、いちばん短い道の線を何倍の長さとして数えるか
+const ROUTE_AVOID_RATE = 3;         // 別の道を探すとき、いちばん短い道の線を何倍の長さとして数えるか（一部だけ同じ道も出せるよう、ゆるめにする）
 const ROUTE_ALT_MAX_RATE = 3;       // 別の道は、いちばん短い道の何倍の長さまでにするか
 const ROUTE_ALT_MIN_EXTRA_KM = 15;  // 短い区間でも、これだけは長くてよい
 const ROUTE_TODO_PER_KM = 0.5;      // 増える距離 1km あたり、未アクセス駅がこれだけ増えれば「多く通る道」に使う
@@ -504,6 +504,25 @@ function routeLineSummary(route) {
 
 const PASS_STEP_KM = 0.3;   // 点を置く間隔
 
+// 駅と駅の間（1本の線）の途中で、いちばん近い駅になる駅（両はしの駅は除く）
+// 同じ線は何度も調べることになるので、1回調べたら覚えておく
+const passSegCache = new Map();
+
+function passAlongSegment(ua, ub) {
+  const key = ua + '>' + ub;
+  if (passSegCache.has(key)) return passSegCache.get(key);
+  const a = MASTER.units[ua], b = MASTER.units[ub];
+  const out = [];
+  const steps = Math.max(1, Math.ceil(routeDistKm(a, b) / PASS_STEP_KM));
+  for (let s = 1; s < steps; s++) {
+    const t = s / steps;
+    const near = radarNearest(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t, 1);   // radarplan.js
+    if (near.length && out[out.length - 1] !== near[0].u) out.push(near[0].u);
+  }
+  passSegCache.set(key, out);
+  return out;
+}
+
 // 区間の乗り方（rides）に沿って、途中で取れる駅を順に集める（両はしの駅も入る）
 // 線路データの無い「推定」のつなぎは、実際には乗れないので調べない
 function passAlongRides(rides) {
@@ -513,14 +532,8 @@ function passAlongRides(rides) {
   for (const r of rides) {
     if (r.line === 'guess') { add(r.from); add(r.to); continue; }
     for (let i = 0; i + 1 < r.path.length; i++) {
-      const a = MASTER.units[r.path[i]], b = MASTER.units[r.path[i + 1]];
       add(r.path[i]);
-      const steps = Math.max(1, Math.ceil(routeDistKm(a, b) / PASS_STEP_KM));
-      for (let s = 1; s < steps; s++) {
-        const t = s / steps;
-        const near = radarNearest(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t, 1);   // radarplan.js
-        if (near.length) add(near[0].u);
-      }
+      for (const u of passAlongSegment(r.path[i], r.path[i + 1])) add(u);
       add(r.path[i + 1]);
     }
   }

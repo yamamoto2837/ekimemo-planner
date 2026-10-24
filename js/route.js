@@ -26,6 +26,7 @@ const routeSettings = {
 let routeLeafletMap = null;
 let routeLayerGroup = null;
 let routeMapDiv = null;   // 順番の結果の地図の入れ物（使い回す）
+let routeCands = null;    // ルートの候補: { list: [{ kind, label, plan }], sel: 選んでいる番号, startUnit, targetSet }
 
 // ---------- 準備（app.js から呼ばれる） ----------
 
@@ -160,26 +161,51 @@ function runRoute() {
   // 画面に「考えています」を出してから計算する
   setTimeout(() => {
     const t0 = performance.now();
-    let plan;
+    let cands;
     try {
-      plan = planRoute(targets, start.unit, routeSettings.round);
+      const all = planRoute(targets, start.unit, routeSettings.round);   // 選んだ駅すべてに立ち寄る順番
+      let base = { ...all, dropped: [] };
       // 乗っている途中で取れる駅には寄らない（出発駅・レーダーを使う駅・ルートビューンの2駅は残す）
       const keep = routeKeepStops();   // routepick.js
       if (start.unit) keep.add(start.unit);
-      if (routeSettings.autoPass) {
-        plan = dropPassStops(plan, keep, routeSettings.round);   // routeplan.js
-      } else {
-        plan.dropped = [];
+      if (routeSettings.autoPass) base = dropPassStops(all, keep, routeSettings.round);   // routeplan.js
+      // ルートの候補（routeplan.js。自分で作るルートと同じ計算）
+      //   ・寄らない駅を外した順番での、いちばん短い道
+      //   ・選んだ駅すべてに立ち寄る順番で、区間ごとに道を変えた候補（区間が短いので、一部だけ違う道が出やすい）
+      // どちらも、あとで乗換駅・折り返す駅で区切り直し、同じ道すじになったものは1つにまとめる
+      const list = [{ kind: 'short', label: 'いちばん短い道', route: base, dropped: base.dropped || [] }];
+      if (all.order.length > 1) {
+        for (const c of planRouteCandidates(all.order, appState.resolved.accessed).candidates) {
+          list.push({ kind: c.kind, label: c.kind === 'short' ? '選んだ駅すべてに立ち寄る道' : c.label, route: c.route, dropped: [] });
+        }
       }
-      // 立ち寄る駅を、乗換駅・折り返す駅に置き直す（道すじは変えない）
-      // 「寄らない」がオフのときは、選んだ駅にも立ち寄る
-      if (routeSettings.splitTransfers) {
-        const keep2 = routeSettings.autoPass ? keep : new Set([...keep, ...plan.order]);
-        const before = plan.dropped;
-        plan = splitAtTransfers(plan, keep2);   // routeplan.js
-        plan.dropped = [...new Set([...before, ...plan.removed.filter(u => targets.includes(u))])];
+      const seenPath = new Set();
+      cands = [];
+      for (const c of list) {
+        let p = { ...base, order: c.route.order, legs: c.route.legs, totalKm: c.route.totalKm,
+          guessed: [...new Set([...(base.guessed || []), ...(c.route.guessed || [])])], dropped: c.dropped.slice() };
+        // 立ち寄る駅を、乗換駅・折り返す駅に置き直す（道すじは変えない）
+        // 「寄らない」がオフのときは、選んだ駅にも立ち寄る
+        if (routeSettings.splitTransfers) {
+          const keep2 = routeSettings.autoPass ? keep : new Set([...keep, ...p.order]);
+          const before = p.dropped;
+          p = splitAtTransfers(p, keep2);   // routeplan.js
+          p.dropped = [...new Set([...before, ...p.removed.filter(u => targets.includes(u))])];
+        }
+        addLegPass(p.legs);   // routeplan.js（区間ごとの、途中で取れる駅）
+        // 選んだ駅のうち、この候補では通らずに取れない駅
+        const got = new Set([...p.order, ...p.legs.flatMap(l => l.pass || [])]);
+        p.missing = targets.filter(u => !got.has(u));
+        p.dropped = p.dropped.filter(u => got.has(u));
+        // 同じ道すじの候補は1つにまとめる
+        const seq = [];
+        for (const l of p.legs) for (const r of l.rides) for (const u of r.path) if (seq[seq.length - 1] !== u) seq.push(u);
+        const sig = seq.join(',');
+        if (seenPath.has(sig)) continue;
+        seenPath.add(sig);
+        cands.push({ kind: c.kind, label: c.label, plan: p });
+        if (cands.length >= ROUTE_MAX_CANDIDATES) break;   // routeplan.js
       }
-      addLegPass(plan.legs);   // routeplan.js（区間ごとの、途中で取れる駅）
     } catch (e) {
       msg.textContent = '順番を計算できませんでした: ' + e.message;
       msg.className = 'message error';
@@ -187,10 +213,11 @@ function runRoute() {
       return;
     }
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
-    msg.textContent = (start.note ? start.note + ' ' : '') + `計算しました（${sec} 秒）。`;
+    msg.textContent = (start.note ? start.note + ' ' : '') + `計算しました（${sec} 秒）。` + (cands.length > 1 ? `ルートの候補が ${cands.length} 本あります。` : '');
     msg.className = 'message good';
     document.getElementById('routeRun').disabled = false;
-    renderRouteResult(plan, start.unit, new Set(targets));
+    routeCands = { list: cands, sel: 0, startUnit: start.unit, targetSet: new Set(targets) };
+    renderRouteResult(cands[0].plan, start.unit, routeCands.targetSet);
   }, 30);
 }
 
@@ -204,15 +231,60 @@ function lineName(lc) {
   return MASTER.lines[lc] ? MASTER.lines[lc].name : lc;
 }
 
+// 候補の「レーダー・ルートビューン・途中で取る駅」のまとめ（1回だけ計算して覚えておく）
+function routePlanExtras(plan) {
+  if (!plan._extras) plan._extras = routeExtras(plan.order, plan.legs);   // routepick.js
+  return plan._extras;
+}
+
+// このルートで取れる駅（立ち寄る駅・途中で取る駅・レーダー・ルートビューン）
+function routeGainUnits(plan) {
+  const extras = routePlanExtras(plan);
+  return [
+    ...plan.order, ...(plan.dropped || []), ...extras.targets,
+    ...plan.legs.flatMap(l => l.pass || []),
+    ...[...extras.passAt.values()].flat().map(p => p.u),
+  ];
+}
+
+// ルートの候補を並べる（押すと、その候補で結果を出し直す）
+function routeCandChooser() {
+  const accessed = appState.resolved.accessed;
+  const wrap = el('div', 'panel');
+  wrap.append(el('h3', '', `ルートの候補（${routeCands.list.length} 本）`));
+  wrap.append(el('p', 'help', '回る順番はそのままに、駅と駅の間の道を変えた候補です。押すと、下の結果がその候補に変わります。'));
+  const list = el('div', 'myroute-cands');
+  routeCands.list.forEach((c, i) => {
+    const b = el('button', 'myroute-cand' + (i === routeCands.sel ? ' selected' : ''));
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(i === routeCands.sel));
+    const gain = new Set(routeGainUnits(c.plan).filter(u => MASTER.units[u] && !accessed.has(u))).size;
+    b.append(
+      el('span', 'myroute-cand-label', `${i + 1}. ${c.label}`),
+      el('span', 'myroute-cand-sum', routeLineSummary(c.plan)),   // routeplan.js
+      el('span', 'myroute-cand-nums', `約 ${Math.round(c.plan.totalKm)} km・埋まる駅 ${gain} 駅` + (c.plan.missing.length ? `・選んだ駅のうち ${c.plan.missing.length} 駅は取れません` : '')),
+    );
+    b.addEventListener('click', () => {
+      routeCands.sel = i;
+      renderRouteResult(c.plan, routeCands.startUnit, routeCands.targetSet);
+      document.getElementById('routeResult').scrollIntoView({ block: 'start' });
+    });
+    list.append(b);
+  });
+  wrap.append(list);
+  return wrap;
+}
+
 function renderRouteResult(plan, startUnit, targetSet) {
   const box = document.getElementById('routeResult');
   box.replaceChildren();
   if (plan.order.length === 0) { box.append(el('p', 'muted', '回れる駅がありませんでした。')); return; }
+  if (routeCands && routeCands.list.length > 1) box.append(routeCandChooser());
 
   // 回る駅の数（出発駅も対象なら数に入れる）
   const visitCount = new Set(plan.order.filter(u => targetSet.has(u))).size;
   // レーダー・ルートビューン・途中で取る駅（routepick.js。都道府県で選ぶときは空）
-  const extras = routeExtras(plan.order, plan.legs);
+  const extras = routePlanExtras(plan);
   const accessed = appState.resolved.accessed;
   const dropped = new Set(plan.dropped || []);
   // 区間の途中で取れる駅のうち、表示する駅（選んだ駅か、未アクセスの駅）
@@ -222,6 +294,9 @@ function renderRouteResult(plan, startUnit, targetSet) {
   head.append(el('h3', '', routeSettings.mode === 'stations' ? `${visitCount} 駅にチェックインする順番` : `${visitCount} 駅を回る順番`));
   head.append(el('p', 'detail-count', `線路に沿った距離 約 ${Math.round(plan.totalKm)} km`));
   head.append(el('p', 'plan-line-summary', routeLineSummary(plan)));   // routeplan.js（路線ごとにまとめた書き方）
+  if (plan.missing && plan.missing.length) {
+    head.append(el('p', 'notice', `この候補の道は通らないため、選んだ駅のうち次の ${plan.missing.length} 駅は取れません：${plan.missing.map(u => MASTER.units[u].name).join('、')}`));
+  }
   if (dropped.size) {
     head.append(el('p', 'help', `乗っている途中で取れるため、次の ${dropped.size} 駅には寄らない順番にしました（「途中で取る」として区間に並べています）：${[...dropped].map(u => MASTER.units[u].name).join('、')}`));
   }
@@ -261,13 +336,8 @@ function renderRouteResult(plan, startUnit, targetSet) {
   box.append(head);
 
   // このルートで埋まる駅（gain.js）：立ち寄る駅・途中で取る駅・レーダー・ルートビューン
-  const gainUnits = [
-    ...plan.order, ...dropped, ...extras.targets,
-    ...plan.legs.flatMap(l => l.pass || []),
-    ...[...extras.passAt.values()].flat().map(p => p.u),
-  ];
   const gainPanel = el('div', 'panel');
-  gainPanel.append(gainView(gainUnits));
+  gainPanel.append(gainView(routeGainUnits(plan)));
   box.append(gainPanel);
 
   // プランとして保存（plans.js）

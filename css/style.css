@@ -418,7 +418,8 @@ select {
 .myroute-cand { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px; border: 2px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 .myroute-cand.selected { border-color: var(--accent); background: var(--code-bg); }
 .myroute-cand-label { font-weight: bold; color: var(--accent); }
-.myroute-cand-sum { font-size: 14px; overflow-wrap: anywhere; }
+/* 候補の一覧では3行までに縮める（全文は、選んだ候補の結果に出る） */
+.myroute-cand-sum { font-size: 14px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .myroute-cand-nums { font-size: 12px; color: var(--muted); }
 .myroute-radar { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); background: var(--code-bg); }
 .myroute-radar h4 { margin: 0 0 4px; }
