@@ -258,6 +258,9 @@
         <label class="check"><input type="checkbox" id="routeRound"> 出発駅に戻ってくる</label>
         <label class="check"><input type="checkbox" id="routeClosed" checked> 廃駅も対象にする（駅メモでは廃駅も、近くに行けば取れます）</label>
         <label class="check"><input type="checkbox" id="routeAutoPass" checked> 乗っている途中で取れる駅には寄らない（線路の近くで、いちばん近い駅になる駅を自動で調べます）</label>
+        <label class="route-radar-n">レーダーで取れる駅の数
+          <input type="number" id="routeRadarN" min="1" max="50" inputmode="numeric">
+          駅（いる場所から近い順）</label>
         <div class="buttons">
           <button type="button" id="routeRun" class="primary">順番を考える</button>
         </div>

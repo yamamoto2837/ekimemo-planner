@@ -50,6 +50,7 @@ function initRoutePick() {
       if (Array.isArray(saved.rv)) routeSettings.rv = saved.rv.filter(p => MASTER.units[p.a] && MASTER.units[p.b]);
       if (Array.isArray(saved.pass)) routeSettings.pass = new Set(saved.pass.filter(u => MASTER.units[u]));
       if (typeof saved.autoPass === 'boolean') routeSettings.autoPass = saved.autoPass;
+      if (Number.isInteger(saved.radarN) && saved.radarN >= 1 && saved.radarN <= 50) routeSettings.radarN = saved.radarN;
     }
   } catch (e) { /* 覚えていなくても動く */ }
 
@@ -109,6 +110,7 @@ function storePick() {
       rv: routeSettings.rv,
       pass: [...routeSettings.pass],
       autoPass: routeSettings.autoPass,
+      radarN: routeSettings.radarN,
     }));
   } catch (e) { /* 覚えられなくても動く */ }
 }
@@ -127,7 +129,7 @@ function renderPickRoles() {
   document.querySelectorAll('#routePickRoles .chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.role === pickRole)));
   const help = {
     checkin: '地図の駅を押すと「チェックインする駅」に入ります。もう一度押すと外れます。',
-    radar: '地図の駅を押すと「レーダーで取る駅」に入ります。どのチェックイン駅から取るかは、下の一覧で選べます（決めなければ、いちばん近いチェックイン駅）。',
+    radar: '地図の駅を押すと「レーダーで取る駅」に入ります。使う場所は、経路の中で近い順の番号がいちばん小さくなる所を自動で探します（下の一覧で、使うチェックイン駅を決めることもできます）。',
     rv: '地図の駅を2つ順に押すと、2駅がチェックイン駅になり、その間の駅が「ルートビューンで取る駅」になります。',
     pass: '地図の駅を押すと「途中で取る駅」に入ります。寄らずに、近くを通る電車に乗っている途中で取る駅です（回る順番には入れず、いちばん近い区間に並べます）。',
   };
@@ -203,18 +205,69 @@ function rvUnitSet() {
 
 // ---------- レーダー ----------
 
-// レーダーで取る駅を、どのチェックイン駅から取るか（決めていなければ、いちばん近いチェックイン駅）
-//   checkins … 使えるチェックイン駅（省くと、選んだチェックイン駅すべて）
-function radarFrom(u, checkins) {
-  const list = checkins || [...routeSettings.picked];
-  const chosen = routeSettings.radar.get(u);
-  if (chosen && list.includes(chosen)) return chosen;
-  let best = null, bestD = Infinity;
-  for (const c of list) {
-    const d = routeDistKm(MASTER.units[u], MASTER.units[c]);   // routeplan.js
-    if (d < bestD) { bestD = d; best = c; }
+// 駅メモのレーダーは「いる場所から近い順に n 駅」を取る、という前提（レーダー画面 F9 と同じ）。
+// レーダーで取る駅ごとに、経路の上（チェックイン駅と、乗っている途中の地点）で
+// その駅が近い順の何番目になるかを調べ、いちばん小さい番号になる場所で使う。
+
+// レーダーを使える場所の一覧：チェックイン駅と、区間の道すじの上に 0.3km おきに置いた点
+//   戻り値: [{ lat, lon, stop: チェックイン駅 or null, leg: 区間の番号 or null }]
+function radarUsePoints(order, legs) {
+  const pts = [];
+  const seen = new Set();
+  for (const u of order) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    pts.push({ lat: MASTER.units[u].lat, lon: MASTER.units[u].lon, stop: u, leg: null });
   }
-  return best;
+  (legs || []).forEach((l, i) => {
+    if (!isFinite(l.km)) return;
+    for (const r of l.rides) {
+      if (r.line === 'guess') continue;   // 推定のつなぎは、実際には乗れない
+      for (let k = 0; k + 1 < r.path.length; k++) {
+        const a = MASTER.units[r.path[k]], b = MASTER.units[r.path[k + 1]];
+        const steps = Math.max(1, Math.ceil(routeDistKm(a, b) / PASS_STEP_KM));   // routeplan.js
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          pts.push({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, stop: null, leg: i });
+        }
+      }
+    }
+  });
+  return pts;
+}
+
+// 地点 p で、駅 u が近い順の何番目か（n 番目までに入らなければ 0）
+function radarRankAt(p, u, n) {
+  if (!p.near) p.near = radarNearest(p.lat, p.lon, n);   // radarplan.js（同じ点は1回だけ調べる）
+  const i = p.near.findIndex(x => x.u === u);
+  return i < 0 ? 0 : i + 1;
+}
+
+// レーダーで取る駅を、どこで使うか決める
+//   戻り値: { ok: [{ u, rank, stop, leg, near: その場所でいちばん近い駅, lat, lon }], ng: [{ u, from }] }
+function planRadarUse(order, legs) {
+  const n = routeSettings.radarN;
+  const pts = radarUsePoints(order, legs);
+  const ok = [], ng = [];
+  for (const u of radarTargets()) {
+    const unit = MASTER.units[u];
+    const chosen = routeSettings.radar.get(u);
+    // 使う場所の候補：選んだチェックイン駅があれば、その駅だけ。無ければ経路の上すべて
+    const cands = chosen && order.includes(chosen)
+      ? pts.filter(p => p.stop === chosen)
+      : pts.filter(p => routeDistKm(p, unit) <= 60);
+    let best = null;
+    for (const p of cands) {
+      const rank = radarRankAt(p, u, n);
+      if (!rank) continue;
+      // 番号が小さい場所を選ぶ。同じなら、チェックイン駅を先にする
+      if (!best || rank < best.rank || (rank === best.rank && p.stop && !best.p.stop)) best = { p, rank };
+    }
+    if (!best) { ng.push({ u, from: chosen && order.includes(chosen) ? chosen : null }); continue; }
+    const p = best.p;
+    ok.push({ u, rank: best.rank, stop: p.stop, leg: p.leg, near: p.stop || radarNearest(p.lat, p.lon, 1)[0].u, lat: p.lat, lon: p.lon });
+  }
+  return { ok, ng };
 }
 
 // レーダーで取る駅（「廃駅も対象にする」を外したときは、未アクセスの廃駅を除く）
@@ -239,21 +292,24 @@ function routeKeepStops() {
 // 順番を出したあとの、レーダー・ルートビューン・途中で取る駅のまとめ（route.js の結果の表示と保存で使う）
 //   order … 回る順番（チェックイン駅）
 //   legs … 区間（自分で「途中で取る」にした駅を、いちばん近い区間に割り当てる）
-// 戻り値: { radarAt: Map(チェックイン駅 → [レーダーで取る駅]), radarFromOf: Map(駅 → チェックイン駅),
+// 戻り値: { radar: [{ u, rank, stop, leg, near, lat, lon }]（届く駅）, radarNg: [{ u, from }]（届かない駅）,
+//          radarAt: Map(チェックイン駅 → [radar の項目]), radarLeg: Map(区間の番号 → [radar の項目]),
 //          rv: [{ a, b, units, todo }], passAt: Map(区間の番号 → [{ u, km }]),
 //          targets: [この遠征で取る未アクセス駅（レーダー・ルートビューン・途中で取る）] }
 function routeExtras(order, legs) {
-  const out = { radarAt: new Map(), radarFromOf: new Map(), rv: [], passAt: new Map(), targets: [] };
+  const out = { radar: [], radarNg: [], radarAt: new Map(), radarLeg: new Map(), rv: [], passAt: new Map(), targets: [] };
   if (routeSettings.mode !== 'stations') return out;
   const checkins = [...new Set(order)];
   const targets = new Set();
-  for (const u of radarTargets()) {
-    const from = radarFrom(u, checkins);
-    if (!from) continue;
-    if (!out.radarAt.has(from)) out.radarAt.set(from, []);
-    out.radarAt.get(from).push(u);
-    out.radarFromOf.set(u, from);
-    if (!pickDone(u)) targets.add(u);
+  const use = planRadarUse(order, legs);
+  out.radar = use.ok;
+  out.radarNg = use.ng;
+  for (const r of use.ok) {
+    const map = r.stop ? out.radarAt : out.radarLeg;
+    const key = r.stop || r.leg;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+    if (!pickDone(r.u)) targets.add(r.u);
   }
   out.rv = rvPairs().filter(p => checkins.includes(p.a) && checkins.includes(p.b));
   for (const p of out.rv) for (const u of p.todo) targets.add(u);
@@ -451,8 +507,7 @@ function renderPickedList() {
       row.append(pickChip(u, 'radar', () => { routeSettings.radar.delete(u); pickChanged(); restylePick([u]); }));
       const sel = el('select', 'picked-radar-from');
       sel.setAttribute('aria-label', `${MASTER.units[u].name} をどの駅から取るか`);
-      const auto = radarFrom(u);
-      sel.append(new Option(auto ? `自動（いちばん近い ${MASTER.units[auto].name}）から` : '自動（チェックイン駅がまだありません）', ''));
+      sel.append(new Option('自動（経路の中で届く場所を探す）', ''));
       for (const c of checkins) sel.append(new Option(`${MASTER.units[c].name} から`, c));
       const chosen = routeSettings.radar.get(u);
       sel.value = chosen && routeSettings.picked.has(chosen) ? chosen : '';

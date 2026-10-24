@@ -94,8 +94,9 @@ async function addPlanFromRoute(name, date, route, startUnit, round, targets, ex
     targets: [...new Set([...route.order.filter(u => targets.has(u)), ...(route.dropped || []), ...(extras ? extras.targets : [])])],
     // 選んだけれど、乗っている途中で取れるので寄らないことにした駅
     dropped: route.dropped || [],
-    // レーダーで取る駅（from … どのチェックイン駅から取るか）
-    radar: extras ? [...extras.radarFromOf].map(([u, from]) => ({ u, from })) : [],
+    // レーダーで取る駅
+    // （stop … 使うチェックイン駅、leg … 乗っている途中で使う区間の番号、near … 使う場所でいちばん近い駅、rank … 近い順の何番目か）
+    radar: extras ? extras.radar.map(r => ({ u: r.u, stop: r.stop, leg: r.leg, near: r.near, rank: r.rank })) : [],
     // ルートビューン（a・b … 2つのチェックイン駅、units … 間の駅）
     rv: extras ? extras.rv.map(p => ({ a: p.a, b: p.b, units: p.units })) : [],
     legs: route.legs.map((l, i) => ({
@@ -355,11 +356,21 @@ function planCard(plan) {
       // この区間に乗っている途中で取る駅（自動・指定）
       if (leg.pass && leg.pass.length) rides.append(planExtraLine('pass', '途中で取る', leg.pass, accessed, plan, new Set(plan.dropped || [])));
       if (leg.mine && leg.mine.length) rides.append(planExtraLine('pass', '途中で取る（指定）', leg.mine, accessed, plan));
+      // この区間に乗っている途中で使うレーダー
+      const legRadar = (plan.radar || []).filter(r => r.rank && !r.stop && r.leg === i - 1);
+      if (legRadar.length) radarExtraLines(legRadar, accessed, u => planStationName(plan, u), false).forEach(x => rides.append(x));
       li.append(rides);
     }
     // この駅からレーダーで取る駅（戻ってきた出発駅では出さない）
-    const radarHere = isReturn ? [] : (plan.radar || []).filter(r => r.from === s.u).map(r => r.u);
-    if (radarHere.length) li.append(planExtraLine('radar', 'レーダー', radarHere, accessed, plan));
+    if (!isReturn) {
+      const radars = plan.radar || [];
+      // 今の形（使う場所と何駅目か）
+      const here = radars.filter(r => r.rank && r.stop === s.u);
+      if (here.length) radarExtraLines(here, accessed, u => planStationName(plan, u), true).forEach(x => li.append(x));   // route.js
+      // 前の形（どのチェックイン駅から取るかだけ）
+      const old = radars.filter(r => !r.rank && r.from === s.u).map(r => r.u);
+      if (old.length) li.append(planExtraLine('radar', 'レーダー', old, accessed, plan));
+    }
     list.append(li);
   });
   // 順番の中で2駅が続いていないルートビューンは、まとめて出す

@@ -409,6 +409,8 @@ select {
 .route-extra-radar b { color: var(--radar); }
 .route-extra-rv { border-color: var(--rv); }
 .route-extra-rv b { color: var(--rv); }
+.route-radar-n { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; margin-top: 6px; }
+.route-radar-n input { width: 5em; font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
 .route-extra-pass { border-color: var(--pass); }
 .route-extra-pass b { color: var(--pass); }
 .route-extra-picked { font-weight: bold; text-decoration: underline; text-decoration-color: var(--pass); }
