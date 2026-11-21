@@ -50,7 +50,7 @@ async function replacePlanData(data) {
   planData = data;
   await saveValue(PLAN_KEY, planData);
   // 書いている途中なら描き直さない（メモ、プラン名・日付）
-  const editing = document.activeElement && (document.activeElement.classList.contains('plan-note') || document.activeElement.classList.contains('plan-edit-input'));
+  const editing = document.activeElement && ['plan-note', 'plan-edit-input', 'itin-input'].some(c => document.activeElement.classList.contains(c));
   if (!editing) renderPlans();
 }
 
@@ -411,6 +411,9 @@ function planCard(plan) {
   };
   card.addEventListener('toggle', () => setTimeout(drawMap, 0));
   if (card.open) setTimeout(drawMap, 0);
+
+  // 行程表（itinerary.js）
+  card.append(itinSection(plan));
 
   // ボタン
   const buttons = el('div', 'buttons');

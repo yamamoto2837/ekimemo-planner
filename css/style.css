@@ -625,3 +625,54 @@ select {
   .region-card span { font-size: 10px; }
   .region-card .region-name { font-size: 11px; }
 }
+
+/* ---------- 行程表（itinerary.js） ---------- */
+.itin { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.itin-title { cursor: pointer; color: var(--accent); font-weight: bold; }
+.itin-body { margin-top: 8px; }
+.itin-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.itin-day { margin: 12px 0 4px; padding: 2px 8px; border-left: 4px solid var(--accent); background: var(--code-bg); font-size: 15px; }
+.itin-row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
+.itin-time { flex: 0 0 8.5em; font-weight: bold; font-variant-numeric: tabular-nums; }
+.itin-main { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.itin-tag { display: inline-block; font-size: 11px; padding: 0 6px; margin-right: 6px; border-radius: 8px; color: #ffffff; background: var(--muted); vertical-align: 1px; }
+.itin-ride .itin-tag { background: var(--accent); }
+.itin-stay .itin-tag { background: var(--radar); }
+.itin-meal .itin-tag { background: var(--pass); }
+.itin-sight .itin-tag { background: var(--rv); }
+.itin-note { font-size: 13px; color: var(--muted); }
+.itin-get { font-size: 13px; color: var(--todo); margin-top: 2px; }
+.itin-wait { font-size: 12px; color: var(--muted); padding: 2px 0 2px 9.5em; }
+.itin-warn { font-size: 13px; color: var(--error); font-weight: bold; padding: 2px 0; }
+.itin-edit-row { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.itin-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.itin-fields .itin-input {
+  font: inherit; font-size: 14px; padding: 4px 8px; flex: 1 1 8em; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+}
+.itin-fields .itin-input.itin-t { flex: 0 0 7.5em; }
+.itin-fields .itin-input.itin-wide { flex-basis: 100%; }
+.itin-transit { text-decoration: none; }
+.itin-hint { font-size: 12px; }
+.itin-row-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.itin-row-ctl .memo-button { margin-top: 0; min-width: 2.2em; }
+.itin-insert { font-size: 13px; padding: 2px 6px; }
+.itin-add { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; font-size: 13px; }
+.itin-add .memo-button { margin-top: 0; }
+.itin-print-head { display: none; }
+@media (max-width: 600px) {
+  .itin-row { flex-direction: column; gap: 2px; }
+  .itin-time { flex-basis: auto; }
+  .itin-wait { padding-left: 0; }
+}
+
+/* 行程表だけを印刷する */
+@media print {
+  body.itin-printing * { visibility: hidden; }
+  body.itin-printing .itin-print-target, body.itin-printing .itin-print-target * { visibility: visible; }
+  body.itin-printing .itin-print-target { position: absolute; left: 0; top: 0; width: 100%; border: none; }
+  body.itin-printing .itin-print-head { display: block; }
+  body.itin-printing .itin-controls, body.itin-printing .itin-title { display: none; }
+  body.itin-printing .itin-day { break-after: avoid; }
+  body.itin-printing .itin-row { break-inside: avoid; }
+}
